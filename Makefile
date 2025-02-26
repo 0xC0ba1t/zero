@@ -1,11 +1,11 @@
 build:
-	cargo build --target x86_64-zero.json
+	cargo build
 
 run:
-	cargo run --target x86_64-zero.json
+	cargo run
 
 run-release:
-	cargo run --release --target x86_64-zero.json
+	cargo run --release
 
 build-release:
-	cargo build --release --target x86_64-zero.json
+	cargo build --release
