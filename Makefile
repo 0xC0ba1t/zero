@@ -1,8 +1,8 @@
 build:
-	cargo build --dev
+	cargo build
 
 run:
-	cargo run --dev
+	cargo run
 
 run-release:
 	cargo run --release
