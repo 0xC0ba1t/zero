@@ -10,5 +10,7 @@ fn panic(_info: &PanicInfo) -> ! {
 
 #[no_mangle] // disable name mangling
 pub extern "C" fn _start() -> ! {
+    // entry point func
+    // linker looks for '_start' func by default
     loop {}
 }
