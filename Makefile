@@ -2,7 +2,7 @@ build:
 	cargo build
 
 run:
-	cargo run
+	qemu-system-x86_64 -drive format=raw,file=Z:\zero\target\x86_64-zero\debug\bootimage-zero.bin
 
 run-release:
 	cargo run --release
