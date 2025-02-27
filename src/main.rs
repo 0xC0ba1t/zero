@@ -2,6 +2,7 @@
 #![no_main] // no 'main' function
 
 use core::panic::PanicInfo;
+mod vga_buffer;
 
 #[panic_handler] // defines func as panic handler func
 fn panic(_info: &PanicInfo) -> ! {
