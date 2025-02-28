@@ -1,19 +1,20 @@
-#![no_std] // no use of 'std' lib
-#![no_main] // no 'main' function
+#![no_std]
+#![no_main]
 
 use core::panic::PanicInfo;
+
 mod vga_buffer;
 
-#[panic_handler] // defines func as panic handler func
-fn panic(info: &PanicInfo) -> ! {
-    println!("{}", info); // output panic message
+#[no_mangle]
+pub extern "C" fn _start() -> ! {
+    println!("Hello World{}", "!");
+
     loop {}
 }
 
-#[no_mangle] // disable name mangling
-pub extern "C" fn _start() -> ! { // entry point func
-    println!("Hello World{}", "!"); // hello world!
-    panic!("test panic");
-
+/// This function is called on panic.
+#[panic_handler]
+fn panic(info: &PanicInfo) -> ! {
+    println!("{}", info);
     loop {}
 }
