@@ -13,10 +13,12 @@ pub extern "C" fn _start() -> ! {
 
     zero::init(); // init idt <Interrupt Descriptor Table>
 
-    // (manually) trigger page fault
-    unsafe {
-        *(0xdeadbeef as *mut u8) = 42;
-    };
+    fn stack_overflow() {
+        stack_overflow();
+    }
+
+    // (manually) trigger a stack overflow
+    stack_overflow();
 
     #[cfg(test)]
     test_main();
