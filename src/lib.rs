@@ -7,6 +7,8 @@
 
 use core::panic::PanicInfo;
 
+use interrupts::PIC_1_OFFSET;
+
 pub mod serial;
 pub mod vga_buffer;
 pub mod interrupts;
@@ -63,6 +65,22 @@ pub fn init() {
     interrupts::init_idt();
     unsafe { interrupts::PICS.lock().initialize() };
     x86_64::instructions::interrupts::enable();
+}
+
+#[derive(Debug, Clone, Copy)]
+#[repr(u8)]
+pub enum InterruptIndex {
+    Timer = PIC_1_OFFSET,
+}
+
+impl InterruptIndex {
+    fn as_u8(self) -> u8 {
+        self as u8
+    }
+
+    fn as_usize(self) -> usize {
+        usize::from(self.as_u8())
+    }
 }
 
 /// Entry point for `cargo xtest`

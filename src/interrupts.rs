@@ -1,5 +1,7 @@
 use crate::println;
+use crate::print;
 use crate::gdt;
+use crate::InterruptIndex;
 use lazy_static::lazy_static;
 use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame};
 use pic8259::ChainedPics;
@@ -13,6 +15,8 @@ lazy_static! {
             idt.double_fault.set_handler_fn(double_fault_handler)
                 .set_stack_index(gdt::DOUBLE_FAULT_IST_INDEX);
         }
+        idt[InterruptIndex::Timer.as_usize()]
+            .set_handler_fn(timer_interrupt_handler);
 
         idt
     };
@@ -41,6 +45,12 @@ pub const PIC_2_OFFSET: u8 = PIC_1_OFFSET + 8;
 
 pub static PICS: spin::Mutex<ChainedPics> =
     spin::Mutex::new(unsafe { ChainedPics::new(PIC_1_OFFSET, PIC_2_OFFSET) });
+
+extern "x86-interrupt" fn timer_interrupt_handler(
+    _stack_frame: InterruptStackFrame)
+{
+    print!(".");
+}
 
 #[test_case]
 /// test breakpoint exceptions
