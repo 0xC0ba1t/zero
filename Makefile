@@ -12,3 +12,6 @@ build-release:
 
 test:
 	cargo test
+
+test_lib:
+	cargo test --lib
