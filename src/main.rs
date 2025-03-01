@@ -15,7 +15,7 @@ pub extern "C" fn _start() -> ! {
 
     // (manually) trigger page fault
     unsafe {
-        *(0xdead as *mut u8) = 42;
+        *(0xdeadbeef as *mut u8) = 42;
     };
 
     #[cfg(test)]
