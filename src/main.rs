@@ -13,8 +13,10 @@ pub extern "C" fn _start() -> ! {
 
     zero::init(); // init idt <Interrupt Descriptor Table>
 
-    // (manually) invoke a breakpoint exception
-    x86_64::instructions::interrupts::int3();
+    // (manually) trigger page fault
+    unsafe {
+        *(0xdead as *mut u8) = 42;
+    };
 
     #[cfg(test)]
     test_main();
