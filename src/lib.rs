@@ -57,6 +57,10 @@ pub fn exit_qemu(exit_code: QemuExitCode) {
     }
 }
 
+pub fn init() {
+    interrupts::init_idt();
+}
+
 /// Entry point for `cargo xtest`
 #[cfg(test)]
 #[no_mangle]
