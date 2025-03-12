@@ -17,13 +17,19 @@ pub extern "C" fn _start() -> ! {
         stack_overflow();
     }
 
-    // (manually) trigger a page fault
+    // uncomment lines below (manually) trigger a page fault
 
-    let ptr = 0xdeadbeef as *mut u8;
-    unsafe { *ptr = 42; }
+    // let ptr = 0xdeadbeef as *mut u8;
+    // unsafe { *ptr = 42; }
 
     // uncomment line below to (manually) trigger a stack overflow
     // stack_overflow();
+
+    /// (debug) show PhysAddr of (currently) active lvl 4 page
+    use x86_64::registers::control::Cr3;
+
+    let (level_4_page_table, _) = Cr3::read();
+    println!("Level 4 page table at: {:?}", level_4_page_table.start_address());
 
     #[cfg(test)]
     test_main();
