@@ -4,11 +4,13 @@
 #![test_runner(zero::test_runner)]
 #![reexport_test_harness_main = "test_main"]
 
+use bootloader::{BootInfo, entry_point};
 use zero::println;
 use core::panic::PanicInfo;
 
-#[no_mangle]
-pub extern "C" fn _start() -> ! {
+entry_point!(kernal_main);
+
+fn kernal_main(boot_info: &'static BootInfo) -> ! {
     println!("Hello World{}", "!");
 
     zero::init(); // init idt <Interrupt Descriptor Table>
