@@ -17,6 +17,11 @@ pub extern "C" fn _start() -> ! {
         stack_overflow();
     }
 
+    // (manually) trigger a page fault
+
+    let ptr = 0xdeadbeef as *mut u8;
+    unsafe { *ptr = 42; }
+
     // uncomment line below to (manually) trigger a stack overflow
     // stack_overflow();
 
