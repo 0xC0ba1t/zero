@@ -6,6 +6,8 @@
 #![reexport_test_harness_main = "test_main"]
 
 use core::panic::PanicInfo;
+#[cfg(test)]
+use bootloader::{BootInfo, entry_point};
 
 use interrupts::PIC_1_OFFSET;
 
@@ -90,10 +92,13 @@ impl InterruptIndex {
     }
 }
 
+#[cfg(test)]
+entry_point!(test_kernal_main);
+
 /// Entry point for `cargo xtest`
 #[cfg(test)]
 #[no_mangle]
-pub extern "C" fn _start() -> ! {
+fn test_kernal_main(_boot_info: &'static BootInfo) -> ! {
     init();
     test_main();
     hlt_loop();
