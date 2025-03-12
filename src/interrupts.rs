@@ -7,7 +7,6 @@ use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame};
 use x86_64::structures::idt::PageFaultErrorCode;
 use pic8259::ChainedPics;
 use spin;
-use x86_64::structures::paging::Page;
 use crate::hlt_loop;
 
 lazy_static! {
