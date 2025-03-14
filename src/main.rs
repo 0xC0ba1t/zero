@@ -5,7 +5,6 @@
 #![reexport_test_harness_main = "test_main"]
 
 use bootloader::{BootInfo, entry_point};
-use x86_64::VirtAddr;
 use zero::println;
 use core::panic::PanicInfo;
 
