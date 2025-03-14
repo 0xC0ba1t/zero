@@ -12,7 +12,7 @@ entry_point!(kernal_main);
 
 fn kernal_main(boot_info: &'static BootInfo) -> ! {
 
-    use zero::memory;
+    use zero::memory::{self, BootInfoFrameAllocator};
     use x86_64::{structures::paging::Page, VirtAddr};
 
     println!("Hello World{}", "!");
@@ -21,10 +21,10 @@ fn kernal_main(boot_info: &'static BootInfo) -> ! {
 
     let phys_mem_offset = VirtAddr::new(boot_info.physical_memory_offset);
     let mut mapper = unsafe { memory::init(phys_mem_offset) };
-    let mut frame_allocator = memory::EmptyFrameAllocator;
+    let mut frame_allocator = unsafe { BootInfoFrameAllocator::init(&boot_info.memory_map) };
 
     // map an unused page
-    let page = Page::containing_address(VirtAddr::new(0));
+    let page = Page::containing_address(VirtAddr::new(0xdeadbeef000));
     memory::create_example_mapping(page, &mut mapper, &mut frame_allocator);
 
     // write the string `New!` to the screen through the new mapping
