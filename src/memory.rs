@@ -1,8 +1,21 @@
 use x86_64::{
     structures::paging::PageTable,
+    structures::paging::OffsetPageTable,
     VirtAddr,
     PhysAddr,
 };
+
+/// Initialize a new OffsetPageTable.
+///
+/// This function is unsafe because the caller must guarantee that the
+/// complete physical memory is mapped to virtual memory at the passed
+/// `physical_memory_offset`. Also, this function must be only called once
+/// to avoid aliasing `&mut` references (which is undefined behavior).
+ 
+pub unsafe fn init(physical_memory_offset: VirtAddr) ->OffsetPageTable<'static> {
+    let level_4_table = active_level_4_table(physical_memory_offset);
+    OffsetPageTable::new(level_4_table, physical_memory_offset)
+}
 
 /// Private function that is called by `translate_addr`.
 ///
@@ -51,7 +64,9 @@ fn translate_addr_inner(addr: VirtAddr, physical_memory_offset: VirtAddr)
 /// `physical_memory_offset`. Also, this func must be only called once
 /// to avoid aliasing `&mut` references (which is undefined behaviour).
 
-pub unsafe fn active_level_4_table(physical_memory_offset: VirtAddr)
+// make private
+
+unsafe fn active_level_4_table(physical_memory_offset: VirtAddr)
     -> &'static mut PageTable
 {
     use x86_64::registers::control::Cr3;
