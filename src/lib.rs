@@ -19,6 +19,7 @@ pub mod interrupts;
 pub mod gdt;
 pub mod memory;
 pub mod allocator;
+pub mod interrupt_struct_context;
 
 pub trait Testable {
     fn run(&self) -> ();

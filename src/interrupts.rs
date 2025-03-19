@@ -1,13 +1,9 @@
-use crate::println;
-use crate::print;
-use crate::gdt;
-use crate::InterruptIndex;
+use crate::{gdt, print, println, InterruptIndex, hlt_loop, interrupt_struct_context::Context};
 use lazy_static::lazy_static;
 use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame};
 use x86_64::structures::idt::PageFaultErrorCode;
 use pic8259::ChainedPics;
 use spin;
-use crate::hlt_loop;
 
 lazy_static! {
     static ref IDT: InterruptDescriptorTable = {
