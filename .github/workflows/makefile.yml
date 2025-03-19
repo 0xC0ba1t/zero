@@ -17,6 +17,9 @@ jobs:
     - name: install qemu
       # runner for test / run cmds in Makefile!
       run: sudo apt install qemu-system
+    
+    - name: config target (cargo)
+      run: rustup target add x86_64-unknown-none
 
     - name: Build zero
       # just to ensure build / compile occurs successfully! (enough for most cases)
