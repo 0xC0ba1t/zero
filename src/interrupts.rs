@@ -1,9 +1,17 @@
-use crate::{gdt, print, println, InterruptIndex, hlt_loop, interrupt_struct_context::Context};
+use crate::{gdt, 
+print,
+println, 
+InterruptIndex, 
+hlt_loop, 
+interrupt_struct_context::Context
+};
+
 use lazy_static::lazy_static;
 use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame};
 use x86_64::structures::idt::PageFaultErrorCode;
 use pic8259::ChainedPics;
 use spin;
+use core::arch::{naked_asm, asm};
 
 lazy_static! {
     static ref IDT: InterruptDescriptorTable = {
@@ -14,7 +22,7 @@ lazy_static! {
                 .set_stack_index(gdt::DOUBLE_FAULT_IST_INDEX);
         }
         idt[InterruptIndex::Timer.as_usize()]
-            .set_handler_fn(timer_interrupt_handler);
+            .set_handler_fn(timer_handler_naked);
         idt[InterruptIndex::Keyboard.as_usize()]
             .set_handler_fn(keyboard_interrupt_handler);
 
@@ -62,14 +70,76 @@ pub const PIC_2_OFFSET: u8 = PIC_1_OFFSET + 8;
 pub static PICS: spin::Mutex<ChainedPics> =
     spin::Mutex::new(unsafe { ChainedPics::new(PIC_1_OFFSET, PIC_2_OFFSET) });
 
-extern "x86-interrupt" fn timer_interrupt_handler(
-    _stack_frame: InterruptStackFrame)
-{
-    print!(".");
+extern "C" fn timer_handler(context: &mut Context) {
+    print!("+");
 
+    // let PIC know the interrupt has been processed
     unsafe {
         PICS.lock()
             .notify_end_of_interrupt(InterruptIndex::Timer.as_u8());
+    }
+}
+
+#[naked]
+pub extern "x86-interrupt" fn timer_handler_naked (
+   _stack_frame: InterruptStackFrame) {
+    unsafe {
+        naked_asm!(
+            // Disable interrupts
+            "cli",
+            // Push registers
+            "push rax",
+            "push rbx",
+            "push rcx",
+            "push rdx",
+        
+            "push rdi",
+            "push rsi",
+            "push rbp",
+            "push r8",
+        
+            "push r9",
+            "push r10",
+            "push r11",
+            "push r12",
+        
+            "push r13",
+            "push r14",
+            "push r15",
+        
+            // First argument in rdi with C calling convention
+            "mov rdi, rsp",
+            // Call the hander function
+            "call {handler}",
+        
+            // Pop scratch registers
+            "pop r15",
+            "pop r14",
+            "pop r13",
+        
+            "pop r12",
+            "pop r11",
+            "pop r10",
+            "pop r9",
+        
+            "pop r8",
+            "pop rbp",
+            "pop rsi",
+            "pop rdi",
+        
+            "pop rdx",
+            "pop rcx",
+            "pop rbx",
+            "pop rax",
+            // Enable interrupts
+            "sti",
+            // Interrupt return
+            "iretq",
+            // Note: Getting the handler pointer here using `sym` operand, because
+            // an `in` operand would clobber a register that we need to save, and we
+            // can't have two asm blocks
+            handler = sym timer_handler,
+        );
     }
 }
 
