@@ -26,7 +26,15 @@ lazy_static! {
         idt[InterruptIndex::Keyboard.as_usize()]
             .set_handler_fn(keyboard_interrupt_handler);
 
-        idt.page_fault.set_handler_fn(page_fault_handler);
+        unsafe {
+            idt.page_fault.
+                set_handler_fn(page_fault_handler).
+                set_stack_index(gdt::PAGE_FAULT_IST_INDEX);
+            
+            idt.general_protection_fault.
+                set_handler_fn(general_protection_fault_handler).
+                set_stack_index(gdt::GENERAL_PROTECTION_FAULT_IST_INDEX);
+        }
 
         idt
     };
@@ -62,6 +70,13 @@ extern "x86-interrupt" fn page_fault_handler(
     println!("Error Code: {:?}", error_code);
     println!("{:#?}", stack_frame);
     hlt_loop();
+}
+
+/// handles general protection fault exceptions
+extern "x86-interrupt" fn general_protection_fault_handler(
+    stack_frame: InterruptStackFrame,
+    _error_code: u64) {
+    panic!("EXCEPTION: GENERAL PROTECTION FAULT\n{:#?}", stack_frame);
 }
 
 pub const PIC_1_OFFSET: u8 = 32;
