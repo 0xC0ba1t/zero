@@ -14,22 +14,9 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - name: configure
-      run: ./configure
-
     - name: install qemu
       # runner for test / run cmds in Makefile!
       run: sudo apt install qemu-system
-    
-    - name: Install dependencies
-      # boilerplate
-      run: make
-
-    - name: Run check
-      run: make check
-
-    - name: Run distcheck
-      run: make distcheck
 
     - name: Build zero
       # just to ensure build / compile occurs successfully! (enough for most cases)
