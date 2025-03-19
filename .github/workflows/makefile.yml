@@ -1,0 +1,40 @@
+name: Makefile CI
+
+on:
+  push:
+    branches: [ "v2-wip" ]
+  pull_request:
+    branches: [ "v2" ]
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: install qemu
+      # runner for test / run cmds in Makefile!
+      run: sudo apt install qemu-system
+
+    - name: config cargo env
+      run: | 
+        rustup component add rust-src
+        rustup component add rustc
+        rustup component add llvm-tools
+        rustup component add llvm-tools-preview
+        rustup default nightly
+        rustup component add rust-src --toolchain nightly-x86_64-unknown-linux-gnu
+        cargo install bootimage
+    
+    - name: config target (cargo)
+      run: rustup target add x86_64-unknown-none
+
+    - name: Build zero
+      # just to ensure build / compile occurs successfully! (enough for most cases)
+      run: make build
+
+    # - name: Run tests
+      # warn! : this job is effectively useless (for testing most funcs) as it is non exhaustive and many functions dont have tests [TODO]
+      # run: make test

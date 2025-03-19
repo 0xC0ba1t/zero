@@ -11,7 +11,7 @@ build-release:
 	cargo build --release
 
 test:
-	cargo test
+	cargo +nightly test
 
 test_lib:
 	cargo test --lib

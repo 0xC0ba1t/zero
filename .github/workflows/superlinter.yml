@@ -1,0 +1,15 @@
+name: 'Validate (Lint) Code'
+
+on:
+  schedule: # execute every 12 hours
+    - cron: "* */24 * * *"
+
+jobs:
+  lint-codebase:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: lint
+        uses: github/super-linter@v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
