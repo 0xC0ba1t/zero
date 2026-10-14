@@ -15,13 +15,9 @@ pub fn ticks() -> u64 {
     TICKS.load(Ordering::Relaxed)
 }
 
-/// The PIT is left at its power-on divisor of 65536, so it fires at
-/// 1_193_182 / 65536 = ~18.2065 Hz, i.e. once every ~54.925 ms.
-const MICROS_PER_TICK: u64 = 54_925;
-
-/// Milliseconds since boot (approximate).
+/// Milliseconds since boot (approximate: the PIT divisor is not an exact fit).
 pub fn uptime_ms() -> u64 {
-    ticks() * MICROS_PER_TICK / 1000
+    ticks() * 1000 / TICK_HZ as u64
 }
 
 /// Whole seconds since boot (approximate).
