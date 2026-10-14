@@ -86,6 +86,12 @@ pub static COMMANDS: &[Command] = &[
         about: "restart the machine",
         handler: reboot,
     },
+    Command {
+        name: "shutdown",
+        usage: "shutdown",
+        about: "power off (virtual machines only)",
+        handler: shutdown,
+    },
 ];
 
 /// Looks up a command by name.
@@ -191,4 +197,10 @@ fn reboot(args: &[String]) -> Result<(), CommandError> {
     expect_no_args(args)?;
     println!("rebooting...");
     crate::power::reboot()
+}
+
+fn shutdown(args: &[String]) -> Result<(), CommandError> {
+    expect_no_args(args)?;
+    println!("shutting down...");
+    crate::power::shutdown()
 }
