@@ -92,6 +92,12 @@ pub static COMMANDS: &[Command] = &[
         about: "power off (virtual machines only)",
         handler: shutdown,
     },
+    Command {
+        name: "history",
+        usage: "history",
+        about: "list the lines you entered",
+        handler: history,
+    },
 ];
 
 /// Looks up a command by name.
@@ -203,4 +209,12 @@ fn shutdown(args: &[String]) -> Result<(), CommandError> {
     expect_no_args(args)?;
     println!("shutting down...");
     crate::power::shutdown()
+}
+
+fn history(args: &[String]) -> Result<(), CommandError> {
+    expect_no_args(args)?;
+    for (index, line) in super::history::HISTORY.lock().iter().enumerate() {
+        println!("{:>3}  {}", index + 1, line);
+    }
+    Ok(())
 }
