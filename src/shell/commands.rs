@@ -1,6 +1,6 @@
 //! Built-in shell commands.
 
-use crate::println;
+use crate::{print, println};
 use alloc::string::String;
 
 /// Why a command did not succeed.
@@ -61,6 +61,12 @@ pub static COMMANDS: &[Command] = &[
         usage: "mem",
         about: "show heap usage",
         handler: mem,
+    },
+    Command {
+        name: "color",
+        usage: "color [name]",
+        about: "set the text color, or list the colors",
+        handler: color,
     },
 ];
 
@@ -126,4 +132,28 @@ fn mem(args: &[String]) -> Result<(), CommandError> {
     println!("      {} bytes used", crate::allocator::heap_used());
     println!("      {} bytes free", crate::allocator::heap_free());
     Ok(())
+}
+
+fn color(args: &[String]) -> Result<(), CommandError> {
+    use crate::vga_buffer::{self, Color};
+
+    match args {
+        [] => {
+            for (name, _) in Color::NAMES.iter() {
+                print!("{} ", name);
+            }
+            println!();
+            Ok(())
+        }
+        [name] => {
+            let foreground =
+                Color::from_name(name).ok_or(CommandError::Failed("unknown color"))?;
+            if foreground == Color::Black {
+                return Err(CommandError::Failed("black on black would be invisible"));
+            }
+            vga_buffer::set_color(foreground, Color::Black);
+            Ok(())
+        }
+        _ => Err(CommandError::Usage),
+    }
 }
