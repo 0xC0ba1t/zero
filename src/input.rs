@@ -104,6 +104,11 @@ pub fn read_key() -> Key {
     }
 }
 
+/// Returns the oldest queued key without waiting, if there is one.
+pub fn try_read_key() -> Option<Key> {
+    interrupts::without_interrupts(|| INPUT.lock().pop())
+}
+
 #[test_case]
 fn test_ring_buffer_fifo_order() {
     let mut queue: RingBuffer<4> = RingBuffer::new();
