@@ -1,7 +1,7 @@
 use crate::println;
-use crate::print;
 use crate::gdt;
 use crate::input::{self, Key};
+use crate::time;
 use crate::InterruptIndex;
 use lazy_static::lazy_static;
 use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame};
@@ -70,7 +70,7 @@ pub static PICS: spin::Mutex<ChainedPics> =
 extern "x86-interrupt" fn timer_interrupt_handler(
     _stack_frame: InterruptStackFrame)
 {
-    print!(".");
+    time::tick();
 
     unsafe {
         PICS.lock()
