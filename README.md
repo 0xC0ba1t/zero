@@ -6,7 +6,7 @@ Tiny Rust OS
 After booting, `zero` drops into a tiny shell on the VGA console:
 
 ```
-zero shell v0.2.0 - type `help` for a list of commands
+zero shell v0.3.0 - type `help` for a list of commands
 zero> echo hello
 hello
 ```
