@@ -33,4 +33,32 @@ impl History {
         }
         self.cursor = self.entries.len();
     }
+
+    /// Steps back to an older line. Returns `None` at the oldest one.
+    pub fn older(&mut self) -> Option<&str> {
+        if self.cursor == 0 {
+            return None;
+        }
+        self.cursor -= 1;
+        Some(self.entries[self.cursor].as_str())
+    }
+
+    /// Steps forward to a newer line. Stepping past the newest one yields an
+    /// empty line; after that there is nothing newer and it returns `None`.
+    pub fn newer(&mut self) -> Option<&str> {
+        if self.cursor >= self.entries.len() {
+            return None;
+        }
+        self.cursor += 1;
+        if self.cursor == self.entries.len() {
+            Some("")
+        } else {
+            Some(self.entries[self.cursor].as_str())
+        }
+    }
+
+    /// Iterates over the remembered lines, oldest first.
+    pub fn iter(&self) -> impl Iterator<Item = &str> {
+        self.entries.iter().map(String::as_str)
+    }
 }
