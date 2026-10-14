@@ -111,3 +111,20 @@ fn test_line_editor_submit_takes_the_line() {
     assert_eq!(editor.take(), "ab");
     assert_eq!(editor.as_str(), "");
 }
+
+#[test_case]
+fn test_line_editor_enforces_max_len() {
+    let mut editor = LineEditor::new();
+    for _ in 0..MAX_LEN + 10 {
+        editor.handle(Key::Char('x'));
+    }
+    assert_eq!(editor.as_str().len(), MAX_LEN);
+}
+
+#[test_case]
+fn test_line_editor_ignores_unprintable_keys() {
+    let mut editor = LineEditor::new();
+    assert_eq!(editor.handle(Key::Char('\u{1b}')), Edit::Ignored);
+    assert_eq!(editor.handle(Key::Char('\u{e9}')), Edit::Ignored);
+    assert_eq!(editor.as_str(), "");
+}
