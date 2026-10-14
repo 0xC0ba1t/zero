@@ -287,6 +287,19 @@ pub fn set_color(foreground: Color, background: Color) {
     });
 }
 
+/// Draws a raw byte at `(column, row)` through the global `WRITER`.
+/// `(0, 0)` is the top left corner of the screen.
+pub fn put_at(column: i32, row: i32, byte: u8) {
+    use x86_64::instructions::interrupts;
+
+    if column < 0 || row < 0 {
+        return;
+    }
+    interrupts::without_interrupts(|| {
+        WRITER.lock().put_at(column as usize, row as usize, byte);
+    });
+}
+
 #[test_case]
 fn test_println_simple() {
     println!("test_println_simple output");
