@@ -10,6 +10,8 @@ pub enum CommandError {
     Usage,
     /// The command failed for the given reason.
     Failed(&'static str),
+    /// The command failed and has already printed its own message.
+    Reported,
 }
 
 /// Signature shared by every built-in. It receives the arguments that follow

@@ -115,6 +115,7 @@ pub fn execute(line: &str) -> Outcome {
             println!("{}: {}", command.name, reason);
             Outcome::Failed
         }
+        Err(CommandError::Reported) => Outcome::Failed,
     }
 }
 
