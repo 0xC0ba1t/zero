@@ -7,27 +7,55 @@ mod parser;
 use crate::println;
 use commands::CommandError;
 
+/// What happened when a line was executed.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Outcome {
+    /// The line was blank.
+    Empty,
+    /// The command ran successfully.
+    Success,
+    /// There is no command with that name.
+    NotFound,
+    /// The command was called with the wrong arguments.
+    Usage,
+    /// The command ran but failed.
+    Failed,
+    /// The line could not be parsed.
+    ParseError,
+}
+
 /// Parses and runs a single command line.
-pub fn execute(line: &str) {
+pub fn execute(line: &str) -> Outcome {
     let args = match parser::parse(line) {
         Ok(args) => args,
         Err(error) => {
             println!("parse error: {}", error);
-            return;
+            return Outcome::ParseError;
         }
     };
 
     let (name, rest) = match args.split_first() {
         Some(split) => split,
-        None => return,
+        None => return Outcome::Empty,
     };
 
-    match commands::find(name) {
-        Some(command) => match (command.handler)(rest) {
-            Ok(()) => {}
-            Err(CommandError::Usage) => println!("usage: {}", command.usage),
-            Err(CommandError::Failed(reason)) => println!("{}: {}", command.name, reason),
-        },
-        None => println!("{}: command not found", name),
+    let command = match commands::find(name) {
+        Some(command) => command,
+        None => {
+            println!("{}: command not found", name);
+            return Outcome::NotFound;
+        }
+    };
+
+    match (command.handler)(rest) {
+        Ok(()) => Outcome::Success,
+        Err(CommandError::Usage) => {
+            println!("usage: {}", command.usage);
+            Outcome::Usage
+        }
+        Err(CommandError::Failed(reason)) => {
+            println!("{}: {}", command.name, reason);
+            Outcome::Failed
+        }
     }
 }
