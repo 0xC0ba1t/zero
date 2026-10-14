@@ -30,6 +30,15 @@ impl KernelHost {
     }
 }
 
+/// The number a script sees for a key press.
+fn key_code(key: Key) -> i32 {
+    match key {
+        Key::Char(c) => c as i32,
+        Key::Up => 256,
+        Key::Down => 257,
+    }
+}
+
 impl Host for KernelHost {
     fn clear(&mut self) {
         self.enter_graphics();
@@ -55,14 +64,24 @@ impl Host for KernelHost {
     }
 
     fn key(&mut self) -> i32 {
-        0
+        // drain the queue so a held key can't build up a backlog; the last key wins
+        let mut last = 0;
+        while let Some(key) = input::try_read_key() {
+            last = key_code(key);
+        }
+        last
     }
 
     fn wait_key(&mut self) -> i32 {
-        0
+        key_code(input::read_key())
     }
 
-    fn sleep(&mut self, _ms: u32) {}
+    fn sleep(&mut self, ms: u32) {
+        let target = time::uptime_ms() + ms as u64;
+        while time::uptime_ms() < target && !input::interrupt_requested() {
+            x86_64::instructions::hlt();
+        }
+    }
 
     fn ticks(&mut self) -> u64 {
         time::uptime_ms()
