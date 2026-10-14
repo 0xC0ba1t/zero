@@ -59,3 +59,23 @@ pub fn execute(line: &str) -> Outcome {
         }
     }
 }
+
+#[test_case]
+fn test_execute_blank_line() {
+    assert_eq!(execute("   "), Outcome::Empty);
+}
+
+#[test_case]
+fn test_execute_unknown_command() {
+    assert_eq!(execute("frobnicate"), Outcome::NotFound);
+}
+
+#[test_case]
+fn test_execute_echo() {
+    assert_eq!(execute("echo hello world"), Outcome::Success);
+}
+
+#[test_case]
+fn test_execute_reports_parse_errors() {
+    assert_eq!(execute("echo \"oops"), Outcome::ParseError);
+}
