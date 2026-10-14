@@ -3,9 +3,37 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 
-/// Splits `line` on whitespace.
+/// Splits `line` into words. Words are separated by whitespace, except inside
+/// double quotes, which group several words (or none, for an empty argument).
 pub fn parse(line: &str) -> Vec<String> {
-    line.split_whitespace().map(String::from).collect()
+    let mut args = Vec::new();
+    let mut current = String::new();
+    let mut in_quotes = false;
+    // true once the current word has started, so that `""` yields an empty argument
+    let mut in_word = false;
+
+    for c in line.chars() {
+        match c {
+            '"' => {
+                in_quotes = !in_quotes;
+                in_word = true;
+            }
+            c if c.is_whitespace() && !in_quotes => {
+                if in_word {
+                    args.push(core::mem::take(&mut current));
+                    in_word = false;
+                }
+            }
+            c => {
+                current.push(c);
+                in_word = true;
+            }
+        }
+    }
+    if in_word {
+        args.push(current);
+    }
+    args
 }
 
 #[test_case]
