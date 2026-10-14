@@ -118,6 +118,12 @@ pub static COMMANDS: &[Command] = &[
         about: "run a one-line script, `;` separates statements",
         handler: exec,
     },
+    Command {
+        name: "eval",
+        usage: "eval <expression>",
+        about: "print the value of an expression",
+        handler: eval,
+    },
 ];
 
 /// Looks up a command by name.
@@ -274,6 +280,13 @@ fn exec(args: &[String]) -> Result<(), CommandError> {
         return Err(CommandError::Usage);
     }
     run_script(&args.join(" "))
+}
+
+fn eval(args: &[String]) -> Result<(), CommandError> {
+    if args.is_empty() {
+        return Err(CommandError::Usage);
+    }
+    run_script(&alloc::format!("print {}", args.join(" ")))
 }
 
 /// Returns the name of the only command that starts with `prefix`, if there is exactly one.
