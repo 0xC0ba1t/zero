@@ -278,6 +278,29 @@ impl Compiler {
         Ok(Expr::Call(func, args))
     }
 
+    /// Parses the comma separated things that `print` and `text` output.
+    fn items(&mut self) -> Result<Vec<Item>, ScriptError> {
+        let mut items = Vec::new();
+        if self.pos >= self.toks.len() {
+            return Ok(items);
+        }
+        loop {
+            let next = self.peek().cloned();
+            let item = match next {
+                Some(Token::Str(text)) => {
+                    self.pos += 1;
+                    Item::Text(text)
+                }
+                _ => Item::Value(self.expr()?),
+            };
+            items.push(item);
+            if !self.eat(&Token::Comma) {
+                break;
+            }
+        }
+        Ok(items)
+    }
+
     // ---- statements ----
 
     /// Compiles `name = expr`; the name and the `=` are already consumed.
@@ -308,6 +331,12 @@ impl Compiler {
                 let name = self.expect_ident("a variable name")?;
                 self.expect(&Token::Eq, "=")?;
                 self.assign(name)
+            }
+            "print" => {
+                let items = self.items()?;
+                self.end_of_statement()?;
+                self.emit(Stmt::Print(items));
+                Ok(())
             }
             _ => {
                 if self.peek() == Some(&Token::Eq) {
