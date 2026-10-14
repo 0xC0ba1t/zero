@@ -185,6 +185,19 @@ impl<'a> Vm<'a> {
                 let text = self.render(items, host)?;
                 host.print(&text);
             }
+            Stmt::If { cond, otherwise } => {
+                if self.eval(cond, host)? == 0 {
+                    next = *otherwise;
+                }
+            }
+            Stmt::Else { end } => next = *end,
+            Stmt::EndIf => {}
+            Stmt::While { cond, end } => {
+                if self.eval(cond, host)? == 0 {
+                    next = *end;
+                }
+            }
+            Stmt::EndWhile { start } => next = *start,
             _ => return Err("not implemented yet"),
         }
 
