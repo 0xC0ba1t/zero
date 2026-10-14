@@ -142,3 +142,18 @@ fn test_line_editor_ignores_unprintable_keys() {
     assert_eq!(editor.handle(Key::Char('\u{e9}')), Edit::Ignored);
     assert_eq!(editor.as_str(), "");
 }
+
+#[test_case]
+fn test_line_editor_maps_arrow_keys() {
+    let mut editor = LineEditor::new();
+    assert_eq!(editor.handle(Key::Up), Edit::Older);
+    assert_eq!(editor.handle(Key::Down), Edit::Newer);
+}
+
+#[test_case]
+fn test_line_editor_set_replaces_the_line() {
+    let mut editor = LineEditor::new();
+    type_str(&mut editor, "old");
+    editor.set("new line");
+    assert_eq!(editor.as_str(), "new line");
+}
