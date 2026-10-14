@@ -278,11 +278,47 @@ impl Compiler {
         Ok(Expr::Call(func, args))
     }
 
+    // ---- statements ----
+
+    /// Compiles `name = expr`; the name and the `=` are already consumed.
+    fn assign(&mut self, name: String) -> Result<(), ScriptError> {
+        if is_keyword(&name) {
+            return Err(self.error(&format!("'{}' is a keyword", name)));
+        }
+        let slot = self.intern(&name);
+        let value = self.expr()?;
+        self.end_of_statement()?;
+        self.emit(Stmt::Assign(slot, value));
+        Ok(())
+    }
+
+    /// Compiles one statement (the tokens of a single line, without the `Eol`).
     fn statement(&mut self, toks: Vec<Spanned>) -> Result<(), ScriptError> {
         self.line = toks[0].line;
         self.toks = toks;
-        self.pos = 0;
-        Err(self.error("statements are not supported yet"))
+        self.pos = 1;
+
+        let word = match self.toks[0].token.clone() {
+            Token::Ident(word) => word,
+            _ => return Err(self.error("a statement must start with a keyword or variable name")),
+        };
+
+        match word.as_str() {
+            "let" => {
+                let name = self.expect_ident("a variable name")?;
+                self.expect(&Token::Eq, "=")?;
+                self.assign(name)
+            }
+            _ => {
+                if self.peek() == Some(&Token::Eq) {
+                    self.pos += 1;
+                    // `word` is still borrowed by the match above, so hand over a copy
+                    self.assign(word.clone())
+                } else {
+                    Err(self.error(&format!("unknown statement '{}'", word)))
+                }
+            }
+        }
     }
 
     fn finish(self) -> Result<Program, ScriptError> {
