@@ -74,6 +74,12 @@ pub static COMMANDS: &[Command] = &[
         about: "trigger a breakpoint exception",
         handler: breakpoint,
     },
+    Command {
+        name: "panic",
+        usage: "panic",
+        about: "panic on purpose",
+        handler: crash,
+    },
 ];
 
 /// Looks up a command by name.
@@ -168,4 +174,9 @@ fn breakpoint(args: &[String]) -> Result<(), CommandError> {
     expect_no_args(args)?;
     x86_64::instructions::interrupts::int3();
     Ok(())
+}
+
+fn crash(args: &[String]) -> Result<(), CommandError> {
+    expect_no_args(args)?;
+    panic!("panic requested from the shell");
 }
