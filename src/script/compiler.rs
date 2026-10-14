@@ -338,6 +338,80 @@ impl Compiler {
                 self.emit(Stmt::Print(items));
                 Ok(())
             }
+            "if" => {
+                let cond = self.expr()?;
+                self.end_of_statement()?;
+                let stmt = self.emit(Stmt::If { cond, otherwise: 0 });
+                self.blocks.push(Block::If {
+                    stmt,
+                    else_stmt: None,
+                });
+                Ok(())
+            }
+            "else" => {
+                self.end_of_statement()?;
+                let (if_stmt, has_else) = match self.blocks.last() {
+                    Some(Block::If { stmt, else_stmt }) => (*stmt, else_stmt.is_some()),
+                    _ => return Err(self.error("else without a matching if")),
+                };
+                if has_else {
+                    return Err(self.error("this if already has an else"));
+                }
+                let else_stmt = self.emit(Stmt::Else { end: 0 });
+                // when the condition is false, skip to the statement after the `else`
+                if let Stmt::If { otherwise, .. } = &mut self.stmts[if_stmt] {
+                    *otherwise = else_stmt + 1;
+                }
+                if let Some(Block::If { else_stmt: slot, .. }) = self.blocks.last_mut() {
+                    *slot = Some(else_stmt);
+                }
+                Ok(())
+            }
+            "while" => {
+                let cond = self.expr()?;
+                self.end_of_statement()?;
+                let stmt = self.emit(Stmt::While { cond, end: 0 });
+                self.blocks.push(Block::While { stmt });
+                Ok(())
+            }
+            "end" => {
+                self.end_of_statement()?;
+                match self.blocks.pop() {
+                    Some(Block::If { stmt, else_stmt }) => {
+                        let end = self.emit(Stmt::EndIf);
+                        match else_stmt {
+                            Some(else_stmt) => {
+                                if let Stmt::Else { end: target } = &mut self.stmts[else_stmt] {
+                                    *target = end;
+                                }
+                            }
+                            None => {
+                                if let Stmt::If { otherwise, .. } = &mut self.stmts[stmt] {
+                                    *otherwise = end;
+                                }
+                            }
+                        }
+                    }
+                    Some(Block::While { stmt }) => {
+                        self.emit(Stmt::EndWhile { start: stmt });
+                        let after = self.stmts.len();
+                        if let Stmt::While { end, .. } = &mut self.stmts[stmt] {
+                            *end = after;
+                        }
+                    }
+                    Some(Block::Sub { stmt }) => {
+                        self.emit(Stmt::EndSub);
+                        let after = self.stmts.len();
+                        if let Stmt::Sub { end } = &mut self.stmts[stmt] {
+                            *end = after;
+                        }
+                    }
+                    None => {
+                        return Err(self.error("end without a matching if, while or sub"));
+                    }
+                }
+                Ok(())
+            }
             _ => {
                 if self.peek() == Some(&Token::Eq) {
                     self.pos += 1;
