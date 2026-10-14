@@ -29,3 +29,29 @@ Predefined variables: `UP` (256) and `DOWN` (257) for the arrow keys, `ENTER`
 
 Character literals such as `'q'` are numbers (the character code), and `;`
 separates statements on one line. `#` starts a comment.
+
+## Expressions
+
+From the loosest to the tightest binding:
+
+| operators | meaning |
+| --------- | ------- |
+| `\|\|` | or (right side only evaluated if needed) |
+| `&&` | and (same) |
+| `== != < <= > >=` | comparison, gives 1 or 0 |
+| `+ -` | add, subtract |
+| `* / %` | multiply, divide, remainder (division truncates towards zero) |
+| `- !` | negate, not |
+
+Dividing by zero stops the script with an error. Zero is false, everything
+else is true.
+
+## Functions
+
+| function | result |
+| -------- | ------ |
+| `rand(n)` | a random number from 0 to n-1 |
+| `abs(x)`, `min(a, b)`, `max(a, b)` | what they say |
+| `key()` | the latest key pressed since the last call, or 0 |
+| `getkey()` | waits for a key and returns it |
+| `ticks()` | milliseconds since boot |
