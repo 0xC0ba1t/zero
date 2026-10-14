@@ -160,6 +160,12 @@ impl Compiler {
     }
 
     fn unary(&mut self) -> Result<Expr, ScriptError> {
+        if self.eat(&Token::Minus) {
+            return Ok(Expr::Neg(Box::new(self.unary()?)));
+        }
+        if self.eat(&Token::Bang) {
+            return Ok(Expr::Not(Box::new(self.unary()?)));
+        }
         self.primary()
     }
 
