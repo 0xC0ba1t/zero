@@ -212,3 +212,76 @@ pub fn tokenize(source: &str) -> Result<Vec<Spanned>, ScriptError> {
     });
     Ok(tokens)
 }
+
+#[cfg(test)]
+fn kinds(source: &str) -> Vec<Token> {
+    tokenize(source)
+        .unwrap()
+        .into_iter()
+        .map(|spanned| spanned.token)
+        .collect()
+}
+
+#[cfg(test)]
+fn ident(name: &str) -> Token {
+    Token::Ident(String::from(name))
+}
+
+#[test_case]
+fn test_tokenize_a_statement() {
+    assert_eq!(
+        kinds("let x = 1 + 2"),
+        [ident("let"), ident("x"), Token::Eq, Token::Num(1), Token::Plus, Token::Num(2), Token::Eol]
+    );
+}
+
+#[test_case]
+fn test_tokenize_operators() {
+    assert_eq!(
+        kinds("== != <= >= < > ! = && ||"),
+        [
+            Token::EqEq,
+            Token::NotEq,
+            Token::Le,
+            Token::Ge,
+            Token::Lt,
+            Token::Gt,
+            Token::Bang,
+            Token::Eq,
+            Token::AndAnd,
+            Token::OrOr,
+            Token::Eol
+        ]
+    );
+}
+
+#[test_case]
+fn test_tokenize_strings_and_characters() {
+    assert_eq!(
+        kinds("print \"a\\nb\", 'x', ' '"),
+        [
+            ident("print"),
+            Token::Str(String::from("a\nb")),
+            Token::Comma,
+            Token::Num(120),
+            Token::Comma,
+            Token::Num(32),
+            Token::Eol
+        ]
+    );
+}
+
+#[test_case]
+fn test_tokenize_comments_and_separators() {
+    assert_eq!(
+        kinds("a # ignored\nb; c"),
+        [ident("a"), Token::Eol, ident("b"), Token::Eol, ident("c"), Token::Eol]
+    );
+}
+
+#[test_case]
+fn test_tokenize_tracks_line_numbers() {
+    let tokens = tokenize("a\n\nb").unwrap();
+    assert_eq!(tokens[0].line, 1);
+    assert_eq!(tokens[tokens.len() - 2].line, 3);
+}
