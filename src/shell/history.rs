@@ -2,9 +2,13 @@
 
 use alloc::string::String;
 use alloc::vec::Vec;
+use spin::Mutex;
 
 /// How many lines are remembered.
 const MAX_ENTRIES: usize = 16;
+
+/// The shell's history, shared with the `history` command.
+pub static HISTORY: Mutex<History> = Mutex::new(History::new());
 
 /// A list of previously entered lines plus a cursor for browsing through them.
 pub struct History {

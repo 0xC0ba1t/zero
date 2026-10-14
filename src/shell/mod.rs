@@ -8,6 +8,7 @@ mod parser;
 use crate::input;
 use crate::{print, println};
 use commands::CommandError;
+use history::HISTORY;
 use line::{Edit, LineEditor};
 
 const PROMPT: &str = "zero> ";
@@ -30,6 +31,7 @@ pub fn run() -> ! {
             Edit::Submitted => {
                 println!();
                 let line = editor.take();
+                HISTORY.lock().push(&line);
                 execute(&line);
                 print!("{}", PROMPT);
             }
