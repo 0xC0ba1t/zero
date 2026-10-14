@@ -20,6 +20,10 @@ pub static PROGRAMS: &[Entry] = &[Entry {
     name: "fizzbuzz",
     about: "fizzbuzz from 1 to 30",
     source: include_str!("../../programs/fizzbuzz.zs"),
+}, Entry {
+    name: "countdown",
+    about: "count down from 5 with sleep",
+    source: include_str!("../../programs/countdown.zs"),
 }];
 
 /// Looks up a built-in script by name.
