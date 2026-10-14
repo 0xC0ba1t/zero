@@ -55,3 +55,28 @@ else is true.
 | `key()` | the latest key pressed since the last call, or 0 |
 | `getkey()` | waits for a key and returns it |
 | `ticks()` | milliseconds since boot |
+
+## Statements
+
+| statement | what it does |
+| --------- | ------------ |
+| `let x = expr` / `x = expr` | assign |
+| `print a, b, ...` | print strings and numbers on one line |
+| `if cond` ... `else` ... `end` | conditional (`else` is optional) |
+| `while cond` ... `end` | loop |
+| `sub name` ... `end` | define a sub (no arguments, variables are global) |
+| `call name` | run a sub; subs may be defined after the call |
+| `return` / `exit` | leave the sub / stop the program |
+
+## Screen
+
+| statement | what it does |
+| --------- | ------------ |
+| `cls` | clear the screen |
+| `plot x, y, ch` | draw a character (code page 437 code) at column x, row y |
+| `text x, y, a, b, ...` | draw strings and numbers at a position |
+| `color n` | set the drawing color, 0 to 15 |
+| `sleep ms` | wait |
+
+The screen is 80 columns by 25 rows, with 0, 0 at the top left. Drawing
+outside the screen is ignored.
