@@ -129,6 +129,8 @@ impl Writer {
             match byte {
                 // printable ASCII byte or newline
                 0x20..=0x7e | b'\n' => self.write_byte(byte),
+                // backspace
+                0x08 => self.backspace(),
                 // not part of printable ASCII range
                 _ => self.write_byte(0xfe),
             }
