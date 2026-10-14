@@ -6,6 +6,7 @@ let bottom = 22
 let height = 5
 let left_x = 3
 let right_x = 76
+let win_score = 5
 
 let py = 10
 let ay = 10
@@ -21,6 +22,7 @@ let delay = 45
 let you = 0
 let cpu = 0
 let running = 1
+let quit = 0
 
 sub draw_field
   cls
@@ -98,6 +100,9 @@ sub after_point
   bx = 40
   by = 12
   sleep 600
+  if you >= win_score || cpu >= win_score
+    running = 0
+  end
 end
 
 call draw_field
@@ -115,6 +120,7 @@ while running
   k = key()
   if k == 'q' || k == ESC
     running = 0
+    quit = 1
   end
   if k == 'w' || k == 'W' || k == UP
     py = py - 2
@@ -182,3 +188,13 @@ while running
 end
 
 cls
+color 15
+if quit
+  print "bye! the score was ", you, " : ", cpu
+else
+  if you > cpu
+    print "you win ", you, " to ", cpu, "!"
+  else
+    print "the computer wins ", cpu, " to ", you
+  end
+end
