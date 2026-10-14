@@ -37,6 +37,36 @@ pub enum Color {
     White = 15,
 }
 
+impl Color {
+    /// All colors together with the names used to refer to them.
+    pub const NAMES: [(&'static str, Color); 16] = [
+        ("black", Color::Black),
+        ("blue", Color::Blue),
+        ("green", Color::Green),
+        ("cyan", Color::Cyan),
+        ("red", Color::Red),
+        ("magenta", Color::Magenta),
+        ("brown", Color::Brown),
+        ("lightgray", Color::LightGray),
+        ("darkgray", Color::DarkGray),
+        ("lightblue", Color::LightBlue),
+        ("lightgreen", Color::LightGreen),
+        ("lightcyan", Color::LightCyan),
+        ("lightred", Color::LightRed),
+        ("pink", Color::Pink),
+        ("yellow", Color::Yellow),
+        ("white", Color::White),
+    ];
+
+    /// Looks up a color by name, ignoring case.
+    pub fn from_name(name: &str) -> Option<Color> {
+        Color::NAMES
+            .iter()
+            .find(|entry| entry.0.eq_ignore_ascii_case(name))
+            .map(|entry| entry.1)
+    }
+}
+
 /// A combination of a foreground and a background color.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(transparent)]
