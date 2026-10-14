@@ -285,3 +285,16 @@ fn test_tokenize_tracks_line_numbers() {
     assert_eq!(tokens[0].line, 1);
     assert_eq!(tokens[tokens.len() - 2].line, 3);
 }
+
+#[test_case]
+fn test_tokenize_errors() {
+    assert_eq!(tokenize("print @").unwrap_err().message, "unexpected character '@'");
+    assert_eq!(tokenize("\"abc").unwrap_err().message, "unterminated string");
+    assert_eq!(tokenize("'ab'").unwrap_err().message, "unterminated character literal");
+    assert_eq!(tokenize("99999999999").unwrap_err().message, "number too large");
+    assert_eq!(
+        tokenize("a & b").unwrap_err().message,
+        "expected && (a single & is not an operator)"
+    );
+    assert_eq!(tokenize("a\nb @").unwrap_err().line, 2);
+}
