@@ -29,8 +29,7 @@ fn kernal_main(boot_info: &'static BootInfo) -> ! {
     #[cfg(test)]
     test_main();
 
-    println!("It did not crash!");
-    zero::hlt_loop();
+    zero::shell::run();
 }
 
 /// This function is called on panic.
