@@ -138,6 +138,11 @@ impl Writer {
         self.update_cursor();
     }
 
+    /// Changes the colors used for everything written from now on.
+    pub fn set_color(&mut self, foreground: Color, background: Color) {
+        self.color_code = ColorCode::new(foreground, background);
+    }
+
     /// Blanks the whole screen and moves the cursor to the start of the last row.
     pub fn clear_screen(&mut self) {
         for row in 0..BUFFER_HEIGHT {
@@ -225,6 +230,15 @@ pub fn clear_screen() {
 
     interrupts::without_interrupts(|| {
         WRITER.lock().clear_screen();
+    });
+}
+
+/// Sets the text colors of the global `WRITER` instance.
+pub fn set_color(foreground: Color, background: Color) {
+    use x86_64::instructions::interrupts;
+
+    interrupts::without_interrupts(|| {
+        WRITER.lock().set_color(foreground, background);
     });
 }
 
