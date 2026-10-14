@@ -337,6 +337,22 @@ pub fn set_cursor_visible(visible: bool) {
     });
 }
 
+/// Returns the current text color as a raw VGA attribute byte.
+pub fn color_code() -> u8 {
+    use x86_64::instructions::interrupts;
+
+    interrupts::without_interrupts(|| WRITER.lock().color_code.0)
+}
+
+/// Restores a color previously returned by `color_code`.
+pub fn set_color_code(code: u8) {
+    use x86_64::instructions::interrupts;
+
+    interrupts::without_interrupts(|| {
+        WRITER.lock().color_code = ColorCode(code);
+    });
+}
+
 #[test_case]
 fn test_println_simple() {
     println!("test_println_simple output");
