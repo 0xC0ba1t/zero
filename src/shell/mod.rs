@@ -202,3 +202,10 @@ fn test_execute_run_and_programs() {
     assert_eq!(execute("run no_such_program"), Outcome::Failed);
     assert_eq!(execute("run"), Outcome::Usage);
 }
+
+#[test_case]
+fn test_execute_src() {
+    assert_eq!(execute("src hello"), Outcome::Success);
+    assert_eq!(execute("src no_such_program"), Outcome::Failed);
+    assert_eq!(execute("src"), Outcome::Usage);
+}

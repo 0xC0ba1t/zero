@@ -124,6 +124,12 @@ pub static COMMANDS: &[Command] = &[
         about: "print the value of an expression",
         handler: eval,
     },
+    Command {
+        name: "src",
+        usage: "src <program>",
+        about: "show the source of a built-in script",
+        handler: src,
+    },
 ];
 
 /// Looks up a command by name.
@@ -287,6 +293,19 @@ fn eval(args: &[String]) -> Result<(), CommandError> {
         return Err(CommandError::Usage);
     }
     run_script(&alloc::format!("print {}", args.join(" ")))
+}
+
+fn src(args: &[String]) -> Result<(), CommandError> {
+    let name = match args {
+        [name] => name,
+        _ => return Err(CommandError::Usage),
+    };
+    let program = crate::script::programs::find(name)
+        .ok_or(CommandError::Failed("no such program, see `programs`"))?;
+    for line in program.source.lines() {
+        println!("{}", line);
+    }
+    Ok(())
 }
 
 /// Returns the name of the only command that starts with `prefix`, if there is exactly one.
