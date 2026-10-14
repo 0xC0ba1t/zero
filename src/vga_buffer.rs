@@ -439,3 +439,12 @@ fn test_color_from_index() {
     // only the low four bits are used
     assert_eq!(Color::from_index(16), Color::Black);
 }
+
+#[test_case]
+fn test_color_code_round_trip() {
+    let saved = color_code();
+    set_color(Color::Red, Color::Black);
+    assert_eq!(color_code(), 0x04);
+    set_color_code(saved);
+    assert_eq!(color_code(), saved);
+}
