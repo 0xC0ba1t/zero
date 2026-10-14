@@ -159,6 +159,29 @@ pub fn tokenize(source: &str) -> Result<Vec<Spanned>, ScriptError> {
                 let token = if c == '&' { Token::AndAnd } else { Token::OrOr };
                 tokens.push(Spanned { token, line });
             }
+            '"' => {
+                chars.next();
+                let mut text = String::new();
+                loop {
+                    match chars.next() {
+                        Some('"') => break,
+                        Some('\n') | None => {
+                            return Err(ScriptError::new(line, "unterminated string"));
+                        }
+                        Some('\\') => match chars.next() {
+                            Some('n') => text.push('\n'),
+                            Some('"') => text.push('"'),
+                            Some('\\') => text.push('\\'),
+                            _ => return Err(ScriptError::new(line, "unknown escape in string")),
+                        },
+                        Some(c) => text.push(c),
+                    }
+                }
+                tokens.push(Spanned {
+                    token: Token::Str(text),
+                    line,
+                });
+            }
             other => {
                 return Err(ScriptError::new(
                     line,
