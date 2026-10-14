@@ -133,6 +133,54 @@ impl Compiler {
         }
     }
 
+    // ---- expressions, from the loosest to the tightest binding operator ----
+
+    fn expr(&mut self) -> Result<Expr, ScriptError> {
+        self.or_expr()
+    }
+
+    fn or_expr(&mut self) -> Result<Expr, ScriptError> {
+        self.and_expr()
+    }
+
+    fn and_expr(&mut self) -> Result<Expr, ScriptError> {
+        self.comparison()
+    }
+
+    fn comparison(&mut self) -> Result<Expr, ScriptError> {
+        self.additive()
+    }
+
+    fn additive(&mut self) -> Result<Expr, ScriptError> {
+        self.multiplicative()
+    }
+
+    fn multiplicative(&mut self) -> Result<Expr, ScriptError> {
+        self.unary()
+    }
+
+    fn unary(&mut self) -> Result<Expr, ScriptError> {
+        self.primary()
+    }
+
+    fn primary(&mut self) -> Result<Expr, ScriptError> {
+        let token = match self.toks.get(self.pos) {
+            Some(spanned) => spanned.token.clone(),
+            None => return Err(self.error("expression expected")),
+        };
+        self.pos += 1;
+
+        match token {
+            Token::Num(value) => Ok(Expr::Num(value)),
+            Token::LParen => {
+                let inner = self.expr()?;
+                self.expect(&Token::RParen, ")")?;
+                Ok(inner)
+            }
+            _ => Err(self.error("expression expected")),
+        }
+    }
+
     fn statement(&mut self, toks: Vec<Spanned>) -> Result<(), ScriptError> {
         self.line = toks[0].line;
         self.toks = toks;
