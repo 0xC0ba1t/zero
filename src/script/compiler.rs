@@ -177,8 +177,17 @@ impl Compiler {
                 self.expect(&Token::RParen, ")")?;
                 Ok(inner)
             }
+            Token::Ident(name) => self.name_or_call(name),
             _ => Err(self.error("expression expected")),
         }
+    }
+
+    fn name_or_call(&mut self, name: String) -> Result<Expr, ScriptError> {
+        if is_keyword(&name) {
+            return Err(self.error(&format!("'{}' is a keyword", name)));
+        }
+        let slot = self.intern(&name);
+        Ok(Expr::Var(slot))
     }
 
     fn statement(&mut self, toks: Vec<Spanned>) -> Result<(), ScriptError> {
