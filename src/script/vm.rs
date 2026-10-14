@@ -364,3 +364,29 @@ fn test_keys_and_drawing() {
     assert_eq!(host.clears, 1);
     assert_eq!(host.slept, 100);
 }
+
+#[test_case]
+fn test_runtime_errors_report_the_line() {
+    assert_eq!(error_of("print 1 / 0"), "line 1: division by zero");
+    assert_eq!(error_of("print 1\nlet x = 4 % 0"), "line 2: division by zero");
+    assert_eq!(error_of("print rand(0)"), "line 1: rand needs a positive limit");
+}
+
+#[test_case]
+fn test_call_depth_is_limited() {
+    assert_eq!(error_of("sub r\n call r\nend\ncall r"), "line 2: call stack overflow");
+}
+
+#[test_case]
+fn test_scripts_can_be_interrupted() {
+    let mut host = MockHost::default();
+    host.interrupt_after = Some(50);
+    let error = super::run("while 1\nend", &mut host).unwrap_err();
+    assert_eq!(error.message, "interrupted");
+}
+
+#[test_case]
+fn test_compile_errors_come_out_of_run() {
+    assert_eq!(error_of("print 1 +"), "line 1: expression expected");
+    assert_eq!(error_of("print \"abc"), "line 1: unterminated string");
+}
