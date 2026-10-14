@@ -9,6 +9,8 @@ pub mod ast;
 pub mod compiler;
 pub mod host;
 pub mod lexer;
+#[cfg(test)]
+mod mock;
 
 use alloc::string::String;
 use core::fmt;
