@@ -1,6 +1,7 @@
 use crate::println;
 use crate::print;
 use crate::gdt;
+use crate::input::{self, Key};
 use crate::InterruptIndex;
 use lazy_static::lazy_static;
 use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame};
@@ -98,8 +99,8 @@ extern "x86-interrupt" fn keyboard_interrupt_handler(
     if let Ok(Some(key_event)) = keyboard.add_byte(scancode) {
         if let Some(key) = keyboard.process_keyevent(key_event) {
             match key {
-                DecodedKey::Unicode(character) => print!("{}", character),
-                DecodedKey::RawKey(key) => print!("{:?}", key),
+                DecodedKey::Unicode(character) => input::push_key(Key::Char(character)),
+                DecodedKey::RawKey(_) => {}
             }
         }
     }
