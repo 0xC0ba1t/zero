@@ -312,6 +312,26 @@ pub fn write_at(column: i32, row: i32, text: &str) {
     }
 }
 
+/// Shows or hides the blinking hardware cursor.
+pub fn set_cursor_visible(visible: bool) {
+    use x86_64::instructions::interrupts;
+    use x86_64::instructions::port::Port;
+
+    interrupts::without_interrupts(|| unsafe {
+        let mut index: Port<u8> = Port::new(0x3D4);
+        let mut data: Port<u8> = Port::new(0x3D5);
+        if visible {
+            index.write(0x0A); // cursor start scanline
+            data.write(14);
+            index.write(0x0B); // cursor end scanline
+            data.write(15);
+        } else {
+            index.write(0x0A);
+            data.write(0x20); // bit 5 turns the cursor off
+        }
+    });
+}
+
 #[test_case]
 fn test_println_simple() {
     println!("test_println_simple output");
