@@ -234,7 +234,6 @@ impl<'a> Vm<'a> {
                     host.sleep(ms as u32);
                 }
             }
-            _ => return Err("not implemented yet"),
         }
 
         self.pc = next;
