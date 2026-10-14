@@ -133,6 +133,21 @@ impl Writer {
         }
     }
 
+    /// Writes a raw byte at any position using the current color.
+    ///
+    /// Positions outside the screen are ignored. Unlike `write_byte` this does
+    /// not move the cursor, which makes it suitable for drawing.
+    pub fn put_at(&mut self, column: usize, row: usize, byte: u8) {
+        if column >= BUFFER_WIDTH || row >= BUFFER_HEIGHT {
+            return;
+        }
+        let color_code = self.color_code;
+        self.buffer.chars[row][column].write(ScreenChar {
+            ascii_character: byte,
+            color_code,
+        });
+    }
+
     /// Erases the character left of the cursor on the current row.
     ///
     /// Does nothing at the start of a row, so the cursor never jumps back to
