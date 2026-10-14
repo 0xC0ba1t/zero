@@ -19,6 +19,10 @@ pub enum Edit {
     Erased,
     /// The user pressed enter.
     Submitted,
+    /// The user wants the previous entry from the history.
+    Older,
+    /// The user wants the next entry from the history.
+    Newer,
 }
 
 /// Collects the characters of the line being typed.
@@ -51,6 +55,14 @@ impl LineEditor {
         self.buf.pop().is_some()
     }
 
+    /// Replaces the whole line, cutting it off at `MAX_LEN` characters.
+    pub fn set(&mut self, text: &str) {
+        self.buf.clear();
+        for c in text.chars().take(MAX_LEN) {
+            self.buf.push(c);
+        }
+    }
+
     /// Takes the finished line out of the editor, leaving it empty.
     pub fn take(&mut self) -> String {
         core::mem::take(&mut self.buf)
@@ -74,6 +86,8 @@ impl LineEditor {
                     Edit::Ignored
                 }
             }
+            Key::Up => Edit::Older,
+            Key::Down => Edit::Newer,
             _ => Edit::Ignored,
         }
     }

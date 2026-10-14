@@ -5,6 +5,7 @@ mod history;
 mod line;
 mod parser;
 
+use alloc::string::String;
 use crate::input;
 use crate::{print, println};
 use commands::CommandError;
@@ -34,6 +35,18 @@ pub fn run() -> ! {
                 HISTORY.lock().push(&line);
                 execute(&line);
                 print!("{}", PROMPT);
+            }
+            Edit::Older => {
+                let entry = HISTORY.lock().older().map(String::from);
+                if let Some(entry) = entry {
+                    replace_line(&mut editor, &entry);
+                }
+            }
+            Edit::Newer => {
+                let entry = HISTORY.lock().newer().map(String::from);
+                if let Some(entry) = entry {
+                    replace_line(&mut editor, &entry);
+                }
             }
             Edit::Ignored => {}
         }
@@ -91,6 +104,15 @@ pub fn execute(line: &str) -> Outcome {
             Outcome::Failed
         }
     }
+}
+
+/// Swaps the line being edited for `new`, both on screen and in the editor.
+fn replace_line(editor: &mut LineEditor, new: &str) {
+    for _ in 0..editor.as_str().len() {
+        print!("\u{8}");
+    }
+    editor.set(new);
+    print!("{}", editor.as_str());
 }
 
 #[test_case]
