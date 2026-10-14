@@ -211,6 +211,29 @@ impl<'a> Vm<'a> {
                 // `return` outside of a sub ends the program
                 None => return Ok(false),
             },
+            Stmt::Cls => host.clear(),
+            Stmt::Plot(x, y, ch) => {
+                let x = self.eval(x, host)?;
+                let y = self.eval(y, host)?;
+                let ch = self.eval(ch, host)?;
+                host.plot(x, y, ch as u8);
+            }
+            Stmt::Text(x, y, items) => {
+                let x = self.eval(x, host)?;
+                let y = self.eval(y, host)?;
+                let text = self.render(items, host)?;
+                host.text(x, y, &text);
+            }
+            Stmt::Color(expr) => {
+                let color = self.eval(expr, host)?;
+                host.set_color(color as u8);
+            }
+            Stmt::Sleep(expr) => {
+                let ms = self.eval(expr, host)?;
+                if ms > 0 {
+                    host.sleep(ms as u32);
+                }
+            }
             _ => return Err("not implemented yet"),
         }
 
