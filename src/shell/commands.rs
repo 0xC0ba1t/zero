@@ -68,6 +68,12 @@ pub static COMMANDS: &[Command] = &[
         about: "set the text color, or list the colors",
         handler: color,
     },
+    Command {
+        name: "breakpoint",
+        usage: "breakpoint",
+        about: "trigger a breakpoint exception",
+        handler: breakpoint,
+    },
 ];
 
 /// Looks up a command by name.
@@ -156,4 +162,10 @@ fn color(args: &[String]) -> Result<(), CommandError> {
         }
         _ => Err(CommandError::Usage),
     }
+}
+
+fn breakpoint(args: &[String]) -> Result<(), CommandError> {
+    expect_no_args(args)?;
+    x86_64::instructions::interrupts::int3();
+    Ok(())
 }
