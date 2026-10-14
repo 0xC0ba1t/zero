@@ -78,3 +78,27 @@ impl LineEditor {
         }
     }
 }
+
+#[cfg(test)]
+fn type_str(editor: &mut LineEditor, text: &str) {
+    for c in text.chars() {
+        editor.handle(Key::Char(c));
+    }
+}
+
+#[test_case]
+fn test_line_editor_collects_characters() {
+    let mut editor = LineEditor::new();
+    type_str(&mut editor, "help");
+    assert_eq!(editor.as_str(), "help");
+}
+
+#[test_case]
+fn test_line_editor_backspace() {
+    let mut editor = LineEditor::new();
+    type_str(&mut editor, "hex\u{8}lp");
+    assert_eq!(editor.as_str(), "help");
+
+    let mut empty = LineEditor::new();
+    assert_eq!(empty.handle(Key::Char('\u{8}')), Edit::Ignored);
+}
