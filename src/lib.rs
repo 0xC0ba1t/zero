@@ -22,6 +22,7 @@ pub mod allocator;
 pub mod input;
 pub mod time;
 pub mod power;
+pub mod shell;
 
 pub trait Testable {
     fn run(&self) -> ();
