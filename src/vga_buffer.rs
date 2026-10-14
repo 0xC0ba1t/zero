@@ -414,3 +414,12 @@ fn test_write_at_draws_a_string() {
         assert_eq!(char::from(writer.buffer.chars[4][11].read().ascii_character), 'i');
     });
 }
+
+#[test_case]
+fn test_color_from_index() {
+    assert_eq!(Color::from_index(0), Color::Black);
+    assert_eq!(Color::from_index(14), Color::Yellow);
+    assert_eq!(Color::from_index(15), Color::White);
+    // only the low four bits are used
+    assert_eq!(Color::from_index(16), Color::Black);
+}
