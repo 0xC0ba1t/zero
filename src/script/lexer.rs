@@ -182,6 +182,21 @@ pub fn tokenize(source: &str) -> Result<Vec<Spanned>, ScriptError> {
                     line,
                 });
             }
+            '\'' => {
+                // a character literal such as 'q' is just a number
+                chars.next();
+                let ch = match chars.next() {
+                    Some(ch) if ch != '\'' && ch != '\n' => ch,
+                    _ => return Err(ScriptError::new(line, "bad character literal")),
+                };
+                if chars.next() != Some('\'') {
+                    return Err(ScriptError::new(line, "unterminated character literal"));
+                }
+                tokens.push(Spanned {
+                    token: Token::Num(ch as i32),
+                    line,
+                });
+            }
             other => {
                 return Err(ScriptError::new(
                     line,
