@@ -156,7 +156,19 @@ impl Compiler {
     }
 
     fn multiplicative(&mut self) -> Result<Expr, ScriptError> {
-        self.unary()
+        let mut left = self.unary()?;
+        loop {
+            let op = match self.peek() {
+                Some(Token::Star) => BinOp::Mul,
+                Some(Token::Slash) => BinOp::Div,
+                Some(Token::Percent) => BinOp::Rem,
+                _ => break,
+            };
+            self.pos += 1;
+            let right = self.unary()?;
+            left = Expr::Bin(op, Box::new(left), Box::new(right));
+        }
+        Ok(left)
     }
 
     fn unary(&mut self) -> Result<Expr, ScriptError> {
