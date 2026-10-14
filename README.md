@@ -42,3 +42,24 @@ Run it with `make run` (needs QEMU and `bootimage`).
 | Ctrl+U | erase the whole line |
 
 Lines are limited to 72 characters so they never wrap onto a second row.
+
+## Scripts
+
+`zero` has a tiny scripting language, zs. See [docs/zs.md](docs/zs.md).
+
+```
+zero> eval 2 + 3 * 4
+14
+zero> programs
+zero> run pong
+```
+
+| command | what it does |
+| ------- | ------------ |
+| `run <program>` | run a built-in script |
+| `programs` | list the built-in scripts |
+| `exec <script>` | run a one-line script, `;` separates statements |
+| `eval <expression>` | print the value of an expression |
+| `src <program>` | show the source of a built-in script |
+
+Ctrl+C stops a running script.
