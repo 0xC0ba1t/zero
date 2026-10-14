@@ -100,3 +100,22 @@ impl Host for KernelHost {
         input::interrupt_requested()
     }
 }
+
+#[test_case]
+fn test_key_codes() {
+    assert_eq!(key_code(Key::Char('q')), 113);
+    assert_eq!(key_code(Key::Char('\n')), 10);
+    assert_eq!(key_code(Key::Up), 256);
+    assert_eq!(key_code(Key::Down), 257);
+}
+
+#[test_case]
+fn test_script_runs_on_the_kernel_host() {
+    let saved = vga_buffer::color_code();
+    {
+        let mut host = KernelHost::new();
+        super::run("color 12\nprint 6 * 7", &mut host).unwrap();
+    }
+    // dropping the host restored the color the script had changed
+    assert_eq!(vga_buffer::color_code(), saved);
+}
