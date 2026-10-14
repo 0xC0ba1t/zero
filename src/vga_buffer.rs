@@ -65,6 +65,11 @@ impl Color {
             .find(|entry| entry.0.eq_ignore_ascii_case(name))
             .map(|entry| entry.1)
     }
+
+    /// Returns the color with the given VGA palette index (only the low 4 bits count).
+    pub fn from_index(index: u8) -> Color {
+        Color::NAMES[(index & 0x0F) as usize].1
+    }
 }
 
 /// A combination of a foreground and a background color.
