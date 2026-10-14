@@ -28,3 +28,8 @@ pub fn uptime_ms() -> u64 {
 pub fn uptime_secs() -> u64 {
     uptime_ms() / 1000
 }
+
+/// Splits a number of seconds into `(hours, minutes, seconds)`.
+pub fn split_hms(total_secs: u64) -> (u64, u64, u64) {
+    (total_secs / 3600, (total_secs / 60) % 60, total_secs % 60)
+}
