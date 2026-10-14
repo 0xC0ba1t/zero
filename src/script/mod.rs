@@ -6,6 +6,7 @@
 //! the interpreter be tested with a fake host.
 
 pub mod host;
+pub mod lexer;
 
 use alloc::string::String;
 use core::fmt;
