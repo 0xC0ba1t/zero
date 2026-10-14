@@ -148,7 +148,22 @@ impl Compiler {
     }
 
     fn comparison(&mut self) -> Result<Expr, ScriptError> {
-        self.additive()
+        let mut left = self.additive()?;
+        loop {
+            let op = match self.peek() {
+                Some(Token::EqEq) => BinOp::Eq,
+                Some(Token::NotEq) => BinOp::Ne,
+                Some(Token::Lt) => BinOp::Lt,
+                Some(Token::Le) => BinOp::Le,
+                Some(Token::Gt) => BinOp::Gt,
+                Some(Token::Ge) => BinOp::Ge,
+                _ => break,
+            };
+            self.pos += 1;
+            let right = self.additive()?;
+            left = Expr::Bin(op, Box::new(left), Box::new(right));
+        }
+        Ok(left)
     }
 
     fn additive(&mut self) -> Result<Expr, ScriptError> {
