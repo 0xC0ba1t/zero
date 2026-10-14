@@ -49,6 +49,11 @@ pub fn run() -> ! {
                 }
             }
             Edit::Complete => complete_line(&mut editor),
+            Edit::Cancelled => {
+                println!("^C");
+                let _ = editor.take();
+                print!("{}", PROMPT);
+            }
             Edit::Ignored => {}
         }
     }

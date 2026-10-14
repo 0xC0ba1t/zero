@@ -25,6 +25,8 @@ pub enum Edit {
     Newer,
     /// The user pressed tab and wants the command name completed.
     Complete,
+    /// The user pressed ctrl+c and wants to abandon the line.
+    Cancelled,
 }
 
 /// Collects the characters of the line being typed.
@@ -89,6 +91,7 @@ impl LineEditor {
                 }
             }
             Key::Char('\t') => Edit::Complete,
+            Key::Char('\u{3}') => Edit::Cancelled,
             Key::Up => Edit::Older,
             Key::Down => Edit::Newer,
             _ => Edit::Ignored,
@@ -165,4 +168,10 @@ fn test_line_editor_set_replaces_the_line() {
 fn test_line_editor_maps_tab_to_complete() {
     let mut editor = LineEditor::new();
     assert_eq!(editor.handle(Key::Char('\t')), Edit::Complete);
+}
+
+#[test_case]
+fn test_line_editor_maps_ctrl_c_to_cancel() {
+    let mut editor = LineEditor::new();
+    assert_eq!(editor.handle(Key::Char('\u{3}')), Edit::Cancelled);
 }
