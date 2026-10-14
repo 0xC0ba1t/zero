@@ -140,11 +140,21 @@ impl Compiler {
     }
 
     fn or_expr(&mut self) -> Result<Expr, ScriptError> {
-        self.and_expr()
+        let mut left = self.and_expr()?;
+        while self.eat(&Token::OrOr) {
+            let right = self.and_expr()?;
+            left = Expr::Bin(BinOp::Or, Box::new(left), Box::new(right));
+        }
+        Ok(left)
     }
 
     fn and_expr(&mut self) -> Result<Expr, ScriptError> {
-        self.comparison()
+        let mut left = self.comparison()?;
+        while self.eat(&Token::AndAnd) {
+            let right = self.comparison()?;
+            left = Expr::Bin(BinOp::And, Box::new(left), Box::new(right));
+        }
+        Ok(left)
     }
 
     fn comparison(&mut self) -> Result<Expr, ScriptError> {
