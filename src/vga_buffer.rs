@@ -137,6 +137,14 @@ impl Writer {
         }
     }
 
+    /// Blanks the whole screen and moves the cursor to the start of the last row.
+    pub fn clear_screen(&mut self) {
+        for row in 0..BUFFER_HEIGHT {
+            self.clear_row(row);
+        }
+        self.column_position = 0;
+    }
+
     /// Shifts all lines one line up and clears the last row.
     fn new_line(&mut self) {
         for row in 1..BUFFER_HEIGHT {
