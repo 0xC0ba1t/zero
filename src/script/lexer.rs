@@ -78,6 +78,28 @@ pub fn tokenize(source: &str) -> Result<Vec<Spanned>, ScriptError> {
                     chars.next();
                 }
             }
+            '0'..='9' => {
+                let mut value: i32 = 0;
+                while let Some(&digit) = chars.peek() {
+                    match digit.to_digit(10) {
+                        Some(digit) => {
+                            let next = value
+                                .checked_mul(10)
+                                .and_then(|value| value.checked_add(digit as i32));
+                            value = match next {
+                                Some(next) => next,
+                                None => return Err(ScriptError::new(line, "number too large")),
+                            };
+                            chars.next();
+                        }
+                        None => break,
+                    }
+                }
+                tokens.push(Spanned {
+                    token: Token::Num(value),
+                    line,
+                });
+            }
             other => {
                 return Err(ScriptError::new(
                     line,
