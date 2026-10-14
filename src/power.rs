@@ -9,6 +9,8 @@ pub fn reboot() -> ! {
     interrupts::disable();
     unsafe {
         let mut command_port: Port<u8> = Port::new(0x64);
+        // wait until the controller can accept a command (input buffer empty)
+        while command_port.read() & 0x02 != 0 {}
         command_port.write(0xFE);
     }
     hlt_loop()
