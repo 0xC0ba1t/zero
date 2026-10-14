@@ -1,6 +1,7 @@
 //! A tiny interactive shell.
 
 mod commands;
+mod history;
 mod line;
 mod parser;
 
