@@ -377,3 +377,15 @@ fn test_put_at_draws_without_moving_the_cursor() {
         writer.put_at(0, BUFFER_HEIGHT, b'X');
     });
 }
+
+#[test_case]
+fn test_write_at_draws_a_string() {
+    use x86_64::instructions::interrupts;
+
+    write_at(10, 4, "hi");
+    interrupts::without_interrupts(|| {
+        let writer = WRITER.lock();
+        assert_eq!(char::from(writer.buffer.chars[4][10].read().ascii_character), 'h');
+        assert_eq!(char::from(writer.buffer.chars[4][11].read().ascii_character), 'i');
+    });
+}
