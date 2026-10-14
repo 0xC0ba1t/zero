@@ -46,3 +46,15 @@ fn test_parse_splits_on_whitespace() {
 fn test_parse_blank_line() {
     assert!(parse("   ").is_empty());
 }
+
+#[test_case]
+fn test_parse_quoted_argument() {
+    let args = parse("echo \"hello   world\" end");
+    assert_eq!(args, ["echo", "hello   world", "end"]);
+}
+
+#[test_case]
+fn test_parse_empty_quotes() {
+    let args = parse("a \"\" b");
+    assert_eq!(args, ["a", "", "b"]);
+}
