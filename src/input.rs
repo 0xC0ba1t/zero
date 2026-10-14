@@ -129,3 +129,11 @@ fn test_ring_buffer_wraps_around() {
     }
     assert!(queue.is_empty());
 }
+
+#[test_case]
+fn test_global_queue_round_trip() {
+    push_key(Key::Char('h'));
+    push_key(Key::Char('i'));
+    assert_eq!(read_key(), Key::Char('h'));
+    assert_eq!(read_key(), Key::Char('i'));
+}
