@@ -3,6 +3,11 @@
 use crate::input::Key;
 use alloc::string::String;
 
+/// Longest line the editor accepts. Together with the prompt this stays below
+/// the width of the screen, so the line being edited never wraps onto a
+/// second row (backspace can't move back up to the previous row).
+pub const MAX_LEN: usize = 72;
+
 /// What happened as a result of a key press.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Edit {
@@ -32,9 +37,13 @@ impl LineEditor {
         &self.buf
     }
 
-    /// Adds a character to the end of the line.
-    pub fn insert(&mut self, c: char) {
+    /// Adds a character to the end of the line. Returns `false` if the line is full.
+    pub fn insert(&mut self, c: char) -> bool {
+        if self.buf.len() >= MAX_LEN {
+            return false;
+        }
         self.buf.push(c);
+        true
     }
 
     /// Removes the last character. Returns `false` if the line was already empty.
@@ -59,8 +68,11 @@ impl LineEditor {
                 }
             }
             Key::Char(c) if c.is_ascii() && !c.is_ascii_control() => {
-                self.insert(c);
-                Edit::Inserted(c)
+                if self.insert(c) {
+                    Edit::Inserted(c)
+                } else {
+                    Edit::Ignored
+                }
             }
             _ => Edit::Ignored,
         }
