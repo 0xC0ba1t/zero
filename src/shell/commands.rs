@@ -100,6 +100,12 @@ pub static COMMANDS: &[Command] = &[
         about: "list the lines you entered",
         handler: history,
     },
+    Command {
+        name: "run",
+        usage: "run <program>",
+        about: "run a built-in script (see programs)",
+        handler: run,
+    },
 ];
 
 /// Looks up a command by name.
@@ -219,6 +225,28 @@ fn history(args: &[String]) -> Result<(), CommandError> {
         println!("{:>3}  {}", index + 1, line);
     }
     Ok(())
+}
+
+/// Runs script source on the real screen and keyboard, reporting errors.
+fn run_script(source: &str) -> Result<(), CommandError> {
+    let mut host = crate::script::kernel_host::KernelHost::new();
+    match crate::script::run(source, &mut host) {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            println!("script error: {}", error);
+            Err(CommandError::Reported)
+        }
+    }
+}
+
+fn run(args: &[String]) -> Result<(), CommandError> {
+    let name = match args {
+        [name] => name,
+        _ => return Err(CommandError::Usage),
+    };
+    let program = crate::script::programs::find(name)
+        .ok_or(CommandError::Failed("no such program, see `programs`"))?;
+    run_script(program.source)
 }
 
 /// Returns the name of the only command that starts with `prefix`, if there is exactly one.
