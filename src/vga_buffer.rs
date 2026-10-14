@@ -37,6 +37,36 @@ pub enum Color {
     White = 15,
 }
 
+impl Color {
+    /// All colors together with the names used to refer to them.
+    pub const NAMES: [(&'static str, Color); 16] = [
+        ("black", Color::Black),
+        ("blue", Color::Blue),
+        ("green", Color::Green),
+        ("cyan", Color::Cyan),
+        ("red", Color::Red),
+        ("magenta", Color::Magenta),
+        ("brown", Color::Brown),
+        ("lightgray", Color::LightGray),
+        ("darkgray", Color::DarkGray),
+        ("lightblue", Color::LightBlue),
+        ("lightgreen", Color::LightGreen),
+        ("lightcyan", Color::LightCyan),
+        ("lightred", Color::LightRed),
+        ("pink", Color::Pink),
+        ("yellow", Color::Yellow),
+        ("white", Color::White),
+    ];
+
+    /// Looks up a color by name, ignoring case.
+    pub fn from_name(name: &str) -> Option<Color> {
+        Color::NAMES
+            .iter()
+            .find(|entry| entry.0.eq_ignore_ascii_case(name))
+            .map(|entry| entry.1)
+    }
+}
+
 /// A combination of a foreground and a background color.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(transparent)]
@@ -103,6 +133,22 @@ impl Writer {
         }
     }
 
+    /// Erases the character left of the cursor on the current row.
+    ///
+    /// Does nothing at the start of a row, so the cursor never jumps back to
+    /// the previous line.
+    pub fn backspace(&mut self) {
+        if self.column_position == 0 {
+            return;
+        }
+        self.column_position -= 1;
+        let blank = ScreenChar {
+            ascii_character: b' ',
+            color_code: self.color_code,
+        };
+        self.buffer.chars[BUFFER_HEIGHT - 1][self.column_position].write(blank);
+    }
+
     /// Writes the given ASCII string to the buffer.
     ///
     /// Wraps lines at `BUFFER_WIDTH`. Supports the `\n` newline character. Does **not**
@@ -113,10 +159,27 @@ impl Writer {
             match byte {
                 // printable ASCII byte or newline
                 0x20..=0x7e | b'\n' => self.write_byte(byte),
+                // backspace
+                0x08 => self.backspace(),
                 // not part of printable ASCII range
                 _ => self.write_byte(0xfe),
             }
         }
+        self.update_cursor();
+    }
+
+    /// Changes the colors used for everything written from now on.
+    pub fn set_color(&mut self, foreground: Color, background: Color) {
+        self.color_code = ColorCode::new(foreground, background);
+    }
+
+    /// Blanks the whole screen and moves the cursor to the start of the last row.
+    pub fn clear_screen(&mut self) {
+        for row in 0..BUFFER_HEIGHT {
+            self.clear_row(row);
+        }
+        self.column_position = 0;
+        self.update_cursor();
     }
 
     /// Shifts all lines one line up and clears the last row.
@@ -129,6 +192,23 @@ impl Writer {
         }
         self.clear_row(BUFFER_HEIGHT - 1);
         self.column_position = 0;
+    }
+
+    /// Moves the blinking hardware cursor to the writer's position.
+    fn update_cursor(&self) {
+        use x86_64::instructions::port::Port;
+
+        let column = core::cmp::min(self.column_position, BUFFER_WIDTH - 1);
+        let position = (BUFFER_HEIGHT - 1) * BUFFER_WIDTH + column;
+
+        unsafe {
+            let mut index: Port<u8> = Port::new(0x3D4);
+            let mut data: Port<u8> = Port::new(0x3D5);
+            index.write(0x0F); // cursor location, low byte
+            data.write((position & 0xFF) as u8);
+            index.write(0x0E); // cursor location, high byte
+            data.write(((position >> 8) & 0xFF) as u8);
+        }
     }
 
     /// Clears a row by overwriting it with blank characters.
@@ -174,6 +254,24 @@ pub fn _print(args: fmt::Arguments) {
     });
 }
 
+/// Clears the VGA text buffer through the global `WRITER` instance.
+pub fn clear_screen() {
+    use x86_64::instructions::interrupts;
+
+    interrupts::without_interrupts(|| {
+        WRITER.lock().clear_screen();
+    });
+}
+
+/// Sets the text colors of the global `WRITER` instance.
+pub fn set_color(foreground: Color, background: Color) {
+    use x86_64::instructions::interrupts;
+
+    interrupts::without_interrupts(|| {
+        WRITER.lock().set_color(foreground, background);
+    });
+}
+
 #[test_case]
 fn test_println_simple() {
     println!("test_println_simple output");
@@ -200,4 +298,26 @@ fn test_println_output() {
             assert_eq!(char::from(screen_char.ascii_character), c);
         }
     });
+}
+
+#[test_case]
+fn test_backspace_erases_last_char() {
+    use core::fmt::Write;
+    use x86_64::instructions::interrupts;
+
+    interrupts::without_interrupts(|| {
+        let mut writer = WRITER.lock();
+        writeln!(writer, "\nabc\u{8}").expect("writeln failed");
+        let row = BUFFER_HEIGHT - 2;
+        assert_eq!(char::from(writer.buffer.chars[row][0].read().ascii_character), 'a');
+        assert_eq!(char::from(writer.buffer.chars[row][1].read().ascii_character), 'b');
+        assert_eq!(char::from(writer.buffer.chars[row][2].read().ascii_character), ' ');
+    });
+}
+
+#[test_case]
+fn test_color_from_name() {
+    assert_eq!(Color::from_name("red"), Some(Color::Red));
+    assert_eq!(Color::from_name("LightBlue"), Some(Color::LightBlue));
+    assert_eq!(Color::from_name("chartreuse"), None);
 }

@@ -1,6 +1,7 @@
 use crate::println;
-use crate::print;
 use crate::gdt;
+use crate::input::{self, Key};
+use crate::time;
 use crate::InterruptIndex;
 use lazy_static::lazy_static;
 use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame};
@@ -69,7 +70,7 @@ pub static PICS: spin::Mutex<ChainedPics> =
 extern "x86-interrupt" fn timer_interrupt_handler(
     _stack_frame: InterruptStackFrame)
 {
-    print!(".");
+    time::tick();
 
     unsafe {
         PICS.lock()
@@ -80,14 +81,14 @@ extern "x86-interrupt" fn timer_interrupt_handler(
 extern "x86-interrupt" fn keyboard_interrupt_handler(
     _stack_frame: InterruptStackFrame)
 {
-    use pc_keyboard::{layouts, DecodedKey, HandleControl, Keyboard, ScancodeSet1};
+    use pc_keyboard::{layouts, DecodedKey, HandleControl, KeyCode, Keyboard, ScancodeSet1};
     use spin::Mutex;
     use x86_64::instructions::port::Port;
 
     lazy_static! {
         static ref KEYBOARD: Mutex<Keyboard<layouts::Us104Key, ScancodeSet1>> =
             Mutex::new(Keyboard::new(ScancodeSet1::new(),
-                layouts::Us104Key, HandleControl::Ignore)
+                layouts::Us104Key, HandleControl::MapLettersToUnicode)
             );
     }
 
@@ -98,8 +99,10 @@ extern "x86-interrupt" fn keyboard_interrupt_handler(
     if let Ok(Some(key_event)) = keyboard.add_byte(scancode) {
         if let Some(key) = keyboard.process_keyevent(key_event) {
             match key {
-                DecodedKey::Unicode(character) => print!("{}", character),
-                DecodedKey::RawKey(key) => print!("{:?}", key),
+                DecodedKey::Unicode(character) => input::push_key(Key::Char(character)),
+                DecodedKey::RawKey(KeyCode::ArrowUp) => input::push_key(Key::Up),
+                DecodedKey::RawKey(KeyCode::ArrowDown) => input::push_key(Key::Down),
+                DecodedKey::RawKey(_) => {}
             }
         }
     }

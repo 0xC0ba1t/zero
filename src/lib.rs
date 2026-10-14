@@ -19,6 +19,10 @@ pub mod interrupts;
 pub mod gdt;
 pub mod memory;
 pub mod allocator;
+pub mod input;
+pub mod time;
+pub mod power;
+pub mod shell;
 
 pub trait Testable {
     fn run(&self) -> ();
@@ -102,8 +106,18 @@ entry_point!(test_kernal_main);
 /// Entry point for `cargo xtest`
 #[cfg(test)]
 #[no_mangle]
-fn test_kernal_main(_boot_info: &'static BootInfo) -> ! {
+fn test_kernal_main(boot_info: &'static BootInfo) -> ! {
+    use crate::memory::BootInfoFrameAllocator;
+    use x86_64::VirtAddr;
+
     init();
+
+    // many tests allocate (shell parser, line editor, history), so they need a heap
+    let phys_mem_offset = VirtAddr::new(boot_info.physical_memory_offset);
+    let mut mapper = unsafe { memory::init(phys_mem_offset) };
+    let mut frame_allocator = unsafe { BootInfoFrameAllocator::init(&boot_info.memory_map) };
+    allocator::init_heap(&mut mapper, &mut frame_allocator).expect("heap initialization failed");
+
     test_main();
     hlt_loop();
 }

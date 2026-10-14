@@ -41,6 +41,16 @@ pub fn init_heap(
     Ok(())
 }
 
+/// Returns the number of heap bytes currently in use.
+pub fn heap_used() -> usize {
+    ALLOCATOR.lock().used()
+}
+
+/// Returns the number of heap bytes that are still free.
+pub fn heap_free() -> usize {
+    ALLOCATOR.lock().free()
+}
+
 pub struct Dummy;
 
 unsafe impl GlobalAlloc for Dummy {
