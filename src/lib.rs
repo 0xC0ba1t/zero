@@ -23,6 +23,7 @@ pub mod input;
 pub mod time;
 pub mod power;
 pub mod shell;
+pub mod script;
 
 pub trait Testable {
     fn run(&self) -> ();
