@@ -314,3 +314,10 @@ fn test_backspace_erases_last_char() {
         assert_eq!(char::from(writer.buffer.chars[row][2].read().ascii_character), ' ');
     });
 }
+
+#[test_case]
+fn test_color_from_name() {
+    assert_eq!(Color::from_name("red"), Some(Color::Red));
+    assert_eq!(Color::from_name("LightBlue"), Some(Color::LightBlue));
+    assert_eq!(Color::from_name("chartreuse"), None);
+}
