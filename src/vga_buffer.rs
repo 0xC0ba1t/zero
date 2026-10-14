@@ -103,6 +103,22 @@ impl Writer {
         }
     }
 
+    /// Erases the character left of the cursor on the current row.
+    ///
+    /// Does nothing at the start of a row, so the cursor never jumps back to
+    /// the previous line.
+    pub fn backspace(&mut self) {
+        if self.column_position == 0 {
+            return;
+        }
+        self.column_position -= 1;
+        let blank = ScreenChar {
+            ascii_character: b' ',
+            color_code: self.color_code,
+        };
+        self.buffer.chars[BUFFER_HEIGHT - 1][self.column_position].write(blank);
+    }
+
     /// Writes the given ASCII string to the buffer.
     ///
     /// Wraps lines at `BUFFER_WIDTH`. Supports the `\n` newline character. Does **not**
