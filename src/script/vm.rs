@@ -51,6 +51,64 @@ impl<'a> Vm<'a> {
         }
     }
 
+    /// Evaluates an expression.
+    fn eval(&mut self, expr: &Expr, host: &mut dyn Host) -> Result<i32, &'static str> {
+        Ok(match expr {
+            Expr::Num(value) => *value,
+            Expr::Var(slot) => self.vars[*slot],
+            Expr::Neg(inner) => self.eval(inner, host)?.wrapping_neg(),
+            Expr::Not(inner) => (self.eval(inner, host)? == 0) as i32,
+            Expr::Bin(op, left, right) => {
+                let l = self.eval(left, host)?;
+                match op {
+                    // `&&` and `||` only evaluate the right side when needed
+                    BinOp::And => {
+                        if l == 0 {
+                            0
+                        } else {
+                            (self.eval(right, host)? != 0) as i32
+                        }
+                    }
+                    BinOp::Or => {
+                        if l != 0 {
+                            1
+                        } else {
+                            (self.eval(right, host)? != 0) as i32
+                        }
+                    }
+                    _ => {
+                        let r = self.eval(right, host)?;
+                        match op {
+                            BinOp::Add => l.wrapping_add(r),
+                            BinOp::Sub => l.wrapping_sub(r),
+                            BinOp::Mul => l.wrapping_mul(r),
+                            BinOp::Div => {
+                                if r == 0 {
+                                    return Err("division by zero");
+                                }
+                                l.wrapping_div(r)
+                            }
+                            BinOp::Rem => {
+                                if r == 0 {
+                                    return Err("division by zero");
+                                }
+                                l.wrapping_rem(r)
+                            }
+                            BinOp::Eq => (l == r) as i32,
+                            BinOp::Ne => (l != r) as i32,
+                            BinOp::Lt => (l < r) as i32,
+                            BinOp::Le => (l <= r) as i32,
+                            BinOp::Gt => (l > r) as i32,
+                            BinOp::Ge => (l >= r) as i32,
+                            BinOp::And | BinOp::Or => 0,
+                        }
+                    }
+                }
+            }
+            Expr::Call(..) => return Err("functions are not supported yet"),
+        })
+    }
+
     /// Executes one statement. Returns `Ok(false)` once the program is done.
     fn step(&mut self, host: &mut dyn Host) -> Result<bool, &'static str> {
         if host.interrupted() {
