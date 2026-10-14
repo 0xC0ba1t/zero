@@ -51,6 +51,33 @@ pub fn tokenize(source: &str) -> Result<Vec<Spanned>, ScriptError> {
 
     while let Some(&c) = chars.peek() {
         match c {
+            '\n' => {
+                chars.next();
+                tokens.push(Spanned {
+                    token: Token::Eol,
+                    line,
+                });
+                line += 1;
+            }
+            ';' => {
+                chars.next();
+                tokens.push(Spanned {
+                    token: Token::Eol,
+                    line,
+                });
+            }
+            c if c.is_whitespace() => {
+                chars.next();
+            }
+            '#' => {
+                // a comment runs to the end of the line
+                while let Some(&c) = chars.peek() {
+                    if c == '\n' {
+                        break;
+                    }
+                    chars.next();
+                }
+            }
             other => {
                 return Err(ScriptError::new(
                     line,
