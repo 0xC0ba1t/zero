@@ -1,5 +1,6 @@
 //! Built-in shell commands.
 
+use crate::println;
 use alloc::string::String;
 
 /// Why a command did not succeed.
@@ -24,9 +25,21 @@ pub struct Command {
 }
 
 /// Every command the shell knows about.
-pub static COMMANDS: &[Command] = &[];
+pub static COMMANDS: &[Command] = &[
+    Command {
+        name: "echo",
+        usage: "echo [text...]",
+        about: "print its arguments",
+        handler: echo,
+    },
+];
 
 /// Looks up a command by name.
 pub fn find(name: &str) -> Option<&'static Command> {
     COMMANDS.iter().find(|command| command.name == name)
+}
+
+fn echo(args: &[String]) -> Result<(), CommandError> {
+    println!("{}", args.join(" "));
+    Ok(())
 }
