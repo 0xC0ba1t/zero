@@ -109,3 +109,12 @@ fn test_ring_buffer_fifo_order() {
     assert_eq!(queue.pop(), Some(Key::Char('b')));
     assert_eq!(queue.pop(), None);
 }
+
+#[test_case]
+fn test_ring_buffer_rejects_push_when_full() {
+    let mut queue: RingBuffer<2> = RingBuffer::new();
+    assert!(queue.push(Key::Char('a')).is_ok());
+    assert!(queue.push(Key::Char('b')).is_ok());
+    assert!(queue.is_full());
+    assert_eq!(queue.push(Key::Char('c')), Err(Key::Char('c')));
+}
