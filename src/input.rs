@@ -99,3 +99,13 @@ pub fn read_key() -> Key {
         }
     }
 }
+
+#[test_case]
+fn test_ring_buffer_fifo_order() {
+    let mut queue: RingBuffer<4> = RingBuffer::new();
+    queue.push(Key::Char('a')).unwrap();
+    queue.push(Key::Char('b')).unwrap();
+    assert_eq!(queue.pop(), Some(Key::Char('a')));
+    assert_eq!(queue.pop(), Some(Key::Char('b')));
+    assert_eq!(queue.pop(), None);
+}
