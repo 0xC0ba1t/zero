@@ -240,8 +240,42 @@ impl Compiler {
         if is_keyword(&name) {
             return Err(self.error(&format!("'{}' is a keyword", name)));
         }
+        if self.peek() == Some(&Token::LParen) {
+            self.pos += 1;
+            return self.call_args(name);
+        }
         let slot = self.intern(&name);
         Ok(Expr::Var(slot))
+    }
+
+    /// Parses the arguments of a built-in function call; the `(` is already consumed.
+    fn call_args(&mut self, name: String) -> Result<Expr, ScriptError> {
+        let (func, arity) = match name.as_str() {
+            "rand" => (Func::Rand, 1),
+            "abs" => (Func::Abs, 1),
+            "min" => (Func::Min, 2),
+            "max" => (Func::Max, 2),
+            "key" => (Func::Key, 0),
+            "getkey" => (Func::GetKey, 0),
+            "ticks" => (Func::Ticks, 0),
+            _ => return Err(self.error(&format!("unknown function '{}'", name))),
+        };
+
+        let mut args = Vec::new();
+        if !self.eat(&Token::RParen) {
+            loop {
+                args.push(self.expr()?);
+                if self.eat(&Token::Comma) {
+                    continue;
+                }
+                self.expect(&Token::RParen, ")")?;
+                break;
+            }
+        }
+        if args.len() != arity {
+            return Err(self.error(&format!("{} takes {} argument(s)", name, arity)));
+        }
+        Ok(Expr::Call(func, args))
     }
 
     fn statement(&mut self, toks: Vec<Spanned>) -> Result<(), ScriptError> {
