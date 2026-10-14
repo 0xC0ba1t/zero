@@ -33,3 +33,11 @@ pub fn uptime_secs() -> u64 {
 pub fn split_hms(total_secs: u64) -> (u64, u64, u64) {
     (total_secs / 3600, (total_secs / 60) % 60, total_secs % 60)
 }
+
+#[test_case]
+fn test_split_hms() {
+    assert_eq!(split_hms(0), (0, 0, 0));
+    assert_eq!(split_hms(59), (0, 0, 59));
+    assert_eq!(split_hms(61), (0, 1, 1));
+    assert_eq!(split_hms(3_723), (1, 2, 3));
+}
