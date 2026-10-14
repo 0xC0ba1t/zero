@@ -119,3 +119,10 @@ fn test_execute_bad_usage() {
 fn test_execute_help_for_unknown_command() {
     assert_eq!(execute("help frobnicate"), Outcome::Failed);
 }
+
+#[test_case]
+fn test_execute_color() {
+    assert_eq!(execute("color chartreuse"), Outcome::Failed);
+    assert_eq!(execute("color black"), Outcome::Failed);
+    assert_eq!(execute("color a b"), Outcome::Usage);
+}
