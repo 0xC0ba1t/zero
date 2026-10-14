@@ -4,8 +4,38 @@ mod commands;
 mod line;
 mod parser;
 
-use crate::println;
+use crate::input;
+use crate::{print, println};
 use commands::CommandError;
+use line::{Edit, LineEditor};
+
+const PROMPT: &str = "zero> ";
+
+/// Runs the shell forever: reads keys, edits the current line, and executes it on enter.
+pub fn run() -> ! {
+    println!(
+        "{} shell v{} - type `help` for a list of commands",
+        env!("CARGO_PKG_NAME"),
+        env!("CARGO_PKG_VERSION")
+    );
+
+    let mut editor = LineEditor::new();
+    print!("{}", PROMPT);
+
+    loop {
+        match editor.handle(input::read_key()) {
+            Edit::Inserted(c) => print!("{}", c),
+            Edit::Erased => print!("\u{8}"),
+            Edit::Submitted => {
+                println!();
+                let line = editor.take();
+                execute(&line);
+                print!("{}", PROMPT);
+            }
+            Edit::Ignored => {}
+        }
+    }
+}
 
 /// What happened when a line was executed.
 #[derive(Debug, PartialEq, Eq)]
