@@ -12,6 +12,7 @@ pub mod kernel_host;
 pub mod lexer;
 #[cfg(test)]
 mod mock;
+pub mod programs;
 pub mod vm;
 
 use alloc::string::String;
