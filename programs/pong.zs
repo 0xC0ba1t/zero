@@ -96,6 +96,22 @@ while running
   py = max(py, top)
   py = min(py, bottom - height + 1)
 
+  # the ball
+  bx = bx + dx
+  by = by + dy
+  by = max(by, top)
+  by = min(by, bottom)
+  if by <= top && dy < 0
+    dy = 1
+  end
+  if by >= bottom && dy > 0
+    dy = -1
+  end
+
+  if bx <= 0 || bx >= WIDTH - 1
+    dx = -dx
+  end
+
   call draw_paddles
   call draw_ball
   frame = frame + 1
