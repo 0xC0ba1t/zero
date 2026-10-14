@@ -48,6 +48,7 @@ pub fn run() -> ! {
                     replace_line(&mut editor, &entry);
                 }
             }
+            Edit::Complete => complete_line(&mut editor),
             Edit::Ignored => {}
         }
     }
@@ -113,6 +114,20 @@ fn replace_line(editor: &mut LineEditor, new: &str) {
     }
     editor.set(new);
     print!("{}", editor.as_str());
+}
+
+/// Completes the command name being typed, if it is unambiguous.
+fn complete_line(editor: &mut LineEditor) {
+    let name = match commands::complete(editor.as_str()) {
+        Some(name) => name,
+        None => return,
+    };
+    let typed = editor.as_str().len();
+    for c in name[typed..].chars().chain(core::iter::once(' ')) {
+        if editor.insert(c) {
+            print!("{}", c);
+        }
+    }
 }
 
 #[test_case]

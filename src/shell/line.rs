@@ -23,6 +23,8 @@ pub enum Edit {
     Older,
     /// The user wants the next entry from the history.
     Newer,
+    /// The user pressed tab and wants the command name completed.
+    Complete,
 }
 
 /// Collects the characters of the line being typed.
@@ -86,6 +88,7 @@ impl LineEditor {
                     Edit::Ignored
                 }
             }
+            Key::Char('\t') => Edit::Complete,
             Key::Up => Edit::Older,
             Key::Down => Edit::Newer,
             _ => Edit::Ignored,
