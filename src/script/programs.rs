@@ -16,6 +16,10 @@ pub static PROGRAMS: &[Entry] = &[Entry {
     name: "hello",
     about: "say hello",
     source: include_str!("../../programs/hello.zs"),
+}, Entry {
+    name: "fizzbuzz",
+    about: "fizzbuzz from 1 to 30",
+    source: include_str!("../../programs/fizzbuzz.zs"),
 }];
 
 /// Looks up a built-in script by name.
