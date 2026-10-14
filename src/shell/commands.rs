@@ -112,6 +112,12 @@ pub static COMMANDS: &[Command] = &[
         about: "list the built-in scripts",
         handler: programs,
     },
+    Command {
+        name: "exec",
+        usage: "exec <script>",
+        about: "run a one-line script, `;` separates statements",
+        handler: exec,
+    },
 ];
 
 /// Looks up a command by name.
@@ -261,6 +267,13 @@ fn programs(args: &[String]) -> Result<(), CommandError> {
         println!("  {:<11}{}", program.name, program.about);
     }
     Ok(())
+}
+
+fn exec(args: &[String]) -> Result<(), CommandError> {
+    if args.is_empty() {
+        return Err(CommandError::Usage);
+    }
+    run_script(&args.join(" "))
 }
 
 /// Returns the name of the only command that starts with `prefix`, if there is exactly one.
