@@ -44,6 +44,12 @@ pub static COMMANDS: &[Command] = &[
         about: "clear the screen",
         handler: clear,
     },
+    Command {
+        name: "version",
+        usage: "version",
+        about: "print the kernel name and version",
+        handler: version,
+    },
 ];
 
 /// Looks up a command by name.
@@ -86,5 +92,11 @@ fn help(args: &[String]) -> Result<(), CommandError> {
 fn clear(args: &[String]) -> Result<(), CommandError> {
     expect_no_args(args)?;
     crate::vga_buffer::clear_screen();
+    Ok(())
+}
+
+fn version(args: &[String]) -> Result<(), CommandError> {
+    expect_no_args(args)?;
+    println!("{} v{}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
     Ok(())
 }
