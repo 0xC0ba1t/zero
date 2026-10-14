@@ -4,6 +4,7 @@
 //! ring buffer and the shell pops them off again. Nothing in here allocates,
 //! so it is safe to use from inside an interrupt handler.
 
+use core::sync::atomic::{AtomicBool, Ordering};
 use spin::Mutex;
 use x86_64::instructions::interrupts;
 
@@ -109,6 +110,25 @@ pub fn try_read_key() -> Option<Key> {
     interrupts::without_interrupts(|| INPUT.lock().pop())
 }
 
+/// Set when the user presses ctrl+c. Long running programs poll it to know
+/// when to stop.
+static INTERRUPT: AtomicBool = AtomicBool::new(false);
+
+/// Records that ctrl+c was pressed.
+pub fn request_interrupt() {
+    INTERRUPT.store(true, Ordering::SeqCst);
+}
+
+/// Returns whether ctrl+c was pressed since the flag was last cleared.
+pub fn interrupt_requested() -> bool {
+    INTERRUPT.load(Ordering::SeqCst)
+}
+
+/// Clears the flag and returns what it was.
+pub fn take_interrupt() -> bool {
+    INTERRUPT.swap(false, Ordering::SeqCst)
+}
+
 #[test_case]
 fn test_ring_buffer_fifo_order() {
     let mut queue: RingBuffer<4> = RingBuffer::new();
@@ -153,4 +173,14 @@ fn test_try_read_key_does_not_block() {
     push_key(Key::Char('z'));
     assert_eq!(try_read_key(), Some(Key::Char('z')));
     assert_eq!(try_read_key(), None);
+}
+
+#[test_case]
+fn test_interrupt_flag() {
+    take_interrupt();
+    assert!(!interrupt_requested());
+    request_interrupt();
+    assert!(interrupt_requested());
+    assert!(take_interrupt());
+    assert!(!interrupt_requested());
 }
