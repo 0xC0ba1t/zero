@@ -5,6 +5,7 @@
 //! so it is safe to use from inside an interrupt handler.
 
 use spin::Mutex;
+use x86_64::instructions::interrupts;
 
 /// A key press that the shell cares about.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -77,4 +78,24 @@ static INPUT: Mutex<RingBuffer<QUEUE_SIZE>> = Mutex::new(RingBuffer::new());
 /// interrupts disabled.
 pub fn push_key(key: Key) {
     let _ = INPUT.lock().push(key);
+}
+
+/// Blocks until a key is available and returns it.
+///
+/// While waiting, the CPU is halted until the next interrupt. Interrupts are
+/// disabled while the queue is checked, so the keyboard handler can neither
+/// deadlock on the queue lock nor slip a key in between the check and the
+/// `hlt` (`enable_and_hlt` enables interrupts right before halting).
+pub fn read_key() -> Key {
+    loop {
+        interrupts::disable();
+        let key = INPUT.lock().pop();
+        match key {
+            Some(key) => {
+                interrupts::enable();
+                return key;
+            }
+            None => interrupts::enable_and_hlt(),
+        }
+    }
 }
