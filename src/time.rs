@@ -41,3 +41,10 @@ fn test_split_hms() {
     assert_eq!(split_hms(61), (0, 1, 1));
     assert_eq!(split_hms(3_723), (1, 2, 3));
 }
+
+#[test_case]
+fn test_tick_increments_counter() {
+    let before = ticks();
+    tick();
+    assert!(ticks() > before);
+}
