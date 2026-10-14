@@ -110,6 +110,18 @@ while running
   py = max(py, top)
   py = min(py, bottom - height + 1)
 
+  # the computer's paddle: slower than the ball, so it can be beaten
+  if frame % 3 != 0 && dx > 0
+    if by < ay + 2
+      ay = ay - 1
+    end
+    if by > ay + 2
+      ay = ay + 1
+    end
+  end
+  ay = max(ay, top)
+  ay = min(ay, bottom - height + 1)
+
   # the ball
   bx = bx + dx
   by = by + dy
