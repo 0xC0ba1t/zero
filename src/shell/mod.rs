@@ -59,6 +59,7 @@ pub fn run() -> ! {
                 vga_buffer::clear_screen();
                 print!("{}{}", PROMPT, editor.as_str());
             }
+            Edit::KillLine => replace_line(&mut editor, ""),
             Edit::Ignored => {}
         }
     }
