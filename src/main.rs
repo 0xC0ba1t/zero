@@ -18,8 +18,6 @@ fn kernal_main(boot_info: &'static BootInfo) -> ! {
     use zero::allocator;
     use x86_64::VirtAddr;
 
-    println!("Hello World{}", "!");
-
     zero::init(); // init idt <Interrupt Descriptor Table>
 
     let phys_mem_offset = VirtAddr::new(boot_info.physical_memory_offset);
