@@ -5,6 +5,8 @@
 //! input and output goes through the `host::Host` trait, which is what lets
 //! the interpreter be tested with a fake host.
 
+pub mod host;
+
 use alloc::string::String;
 use core::fmt;
 
