@@ -18,6 +18,8 @@ let i = 0
 let k = 0
 let frame = 0
 let delay = 45
+let you = 0
+let cpu = 0
 let running = 1
 
 sub draw_field
@@ -37,6 +39,12 @@ sub draw_field
     i = i + 1
   end
   text 24, 24, "w/s or arrows: move   q: quit"
+  call draw_score
+end
+
+sub draw_score
+  color 15
+  text 34, 0, you, " : ", cpu
 end
 
 sub draw_paddles
@@ -83,6 +91,13 @@ sub deflect
   if off > 2
     dy = 1
   end
+end
+
+sub after_point
+  call draw_score
+  bx = 40
+  by = 12
+  sleep 600
 end
 
 call draw_field
@@ -149,8 +164,15 @@ while running
     end
   end
 
-  if bx <= 0 || bx >= WIDTH - 1
-    dx = -dx
+  if bx <= 0
+    cpu = cpu + 1
+    dx = -1
+    call after_point
+  end
+  if bx >= WIDTH - 1
+    you = you + 1
+    dx = 1
+    call after_point
   end
 
   call draw_paddles
