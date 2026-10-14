@@ -493,7 +493,33 @@ impl Compiler {
         }
     }
 
-    fn finish(self) -> Result<Program, ScriptError> {
+    fn finish(mut self) -> Result<Program, ScriptError> {
+        if let Some(block) = self.blocks.last() {
+            let (stmt, what) = match block {
+                Block::If { stmt, .. } => (*stmt, "if"),
+                Block::While { stmt } => (*stmt, "while"),
+                Block::Sub { stmt } => (*stmt, "sub"),
+            };
+            let line = self.lines[stmt];
+            return Err(ScriptError::new(
+                line,
+                &format!("this {} is never closed with end", what),
+            ));
+        }
+
+        for (stmt, name, line) in &self.calls {
+            let target = match self.subs.iter().find(|(existing, _)| existing == name) {
+                Some((_, start)) => *start,
+                None => {
+                    return Err(ScriptError::new(
+                        *line,
+                        &format!("no sub named '{}'", name),
+                    ));
+                }
+            };
+            self.stmts[*stmt] = Stmt::Call(target);
+        }
+
         Ok(Program {
             stmts: self.stmts,
             lines: self.lines,
