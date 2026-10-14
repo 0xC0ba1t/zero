@@ -349,3 +349,19 @@ fn test_color_from_name() {
     assert_eq!(Color::from_name("LightBlue"), Some(Color::LightBlue));
     assert_eq!(Color::from_name("chartreuse"), None);
 }
+
+#[test_case]
+fn test_put_at_draws_without_moving_the_cursor() {
+    use x86_64::instructions::interrupts;
+
+    interrupts::without_interrupts(|| {
+        let mut writer = WRITER.lock();
+        let column = writer.column_position;
+        writer.put_at(5, 3, b'Q');
+        assert_eq!(char::from(writer.buffer.chars[3][5].read().ascii_character), 'Q');
+        assert_eq!(writer.column_position, column);
+        // off-screen positions are ignored instead of panicking
+        writer.put_at(BUFFER_WIDTH, 0, b'X');
+        writer.put_at(0, BUFFER_HEIGHT, b'X');
+    });
+}
