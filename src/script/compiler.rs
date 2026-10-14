@@ -444,6 +444,43 @@ impl Compiler {
                 self.emit(Stmt::Exit);
                 Ok(())
             }
+            "cls" => {
+                self.end_of_statement()?;
+                self.emit(Stmt::Cls);
+                Ok(())
+            }
+            "plot" => {
+                let x = self.expr()?;
+                self.expect(&Token::Comma, ",")?;
+                let y = self.expr()?;
+                self.expect(&Token::Comma, ",")?;
+                let ch = self.expr()?;
+                self.end_of_statement()?;
+                self.emit(Stmt::Plot(x, y, ch));
+                Ok(())
+            }
+            "text" => {
+                let x = self.expr()?;
+                self.expect(&Token::Comma, ",")?;
+                let y = self.expr()?;
+                self.expect(&Token::Comma, ",")?;
+                let items = self.items()?;
+                self.end_of_statement()?;
+                self.emit(Stmt::Text(x, y, items));
+                Ok(())
+            }
+            "color" => {
+                let color = self.expr()?;
+                self.end_of_statement()?;
+                self.emit(Stmt::Color(color));
+                Ok(())
+            }
+            "sleep" => {
+                let ms = self.expr()?;
+                self.end_of_statement()?;
+                self.emit(Stmt::Sleep(ms));
+                Ok(())
+            }
             _ => {
                 if self.peek() == Some(&Token::Eq) {
                     self.pos += 1;
