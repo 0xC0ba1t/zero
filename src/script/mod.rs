@@ -42,3 +42,9 @@ impl fmt::Display for ScriptError {
         }
     }
 }
+
+/// Compiles and runs `source`, using `io` for all input and output.
+pub fn run(source: &str, io: &mut dyn host::Host) -> Result<(), ScriptError> {
+    let program = compiler::compile(source)?;
+    vm::run(&program, io)
+}
