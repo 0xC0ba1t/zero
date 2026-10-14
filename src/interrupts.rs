@@ -81,7 +81,7 @@ extern "x86-interrupt" fn timer_interrupt_handler(
 extern "x86-interrupt" fn keyboard_interrupt_handler(
     _stack_frame: InterruptStackFrame)
 {
-    use pc_keyboard::{layouts, DecodedKey, HandleControl, Keyboard, ScancodeSet1};
+    use pc_keyboard::{layouts, DecodedKey, HandleControl, KeyCode, Keyboard, ScancodeSet1};
     use spin::Mutex;
     use x86_64::instructions::port::Port;
 
@@ -100,6 +100,8 @@ extern "x86-interrupt" fn keyboard_interrupt_handler(
         if let Some(key) = keyboard.process_keyevent(key_event) {
             match key {
                 DecodedKey::Unicode(character) => input::push_key(Key::Char(character)),
+                DecodedKey::RawKey(KeyCode::ArrowUp) => input::push_key(Key::Up),
+                DecodedKey::RawKey(KeyCode::ArrowDown) => input::push_key(Key::Down),
                 DecodedKey::RawKey(_) => {}
             }
         }
