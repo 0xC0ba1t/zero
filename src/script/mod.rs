@@ -6,6 +6,7 @@
 //! the interpreter be tested with a fake host.
 
 pub mod ast;
+pub mod compiler;
 pub mod host;
 pub mod lexer;
 
