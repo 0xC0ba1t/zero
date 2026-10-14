@@ -135,6 +135,7 @@ impl Writer {
                 _ => self.write_byte(0xfe),
             }
         }
+        self.update_cursor();
     }
 
     /// Blanks the whole screen and moves the cursor to the start of the last row.
@@ -143,6 +144,7 @@ impl Writer {
             self.clear_row(row);
         }
         self.column_position = 0;
+        self.update_cursor();
     }
 
     /// Shifts all lines one line up and clears the last row.
@@ -155,6 +157,23 @@ impl Writer {
         }
         self.clear_row(BUFFER_HEIGHT - 1);
         self.column_position = 0;
+    }
+
+    /// Moves the blinking hardware cursor to the writer's position.
+    fn update_cursor(&self) {
+        use x86_64::instructions::port::Port;
+
+        let column = core::cmp::min(self.column_position, BUFFER_WIDTH - 1);
+        let position = (BUFFER_HEIGHT - 1) * BUFFER_WIDTH + column;
+
+        unsafe {
+            let mut index: Port<u8> = Port::new(0x3D4);
+            let mut data: Port<u8> = Port::new(0x3D5);
+            index.write(0x0F); // cursor location, low byte
+            data.write((position & 0xFF) as u8);
+            index.write(0x0E); // cursor location, high byte
+            data.write(((position >> 8) & 0xFF) as u8);
+        }
     }
 
     /// Clears a row by overwriting it with blank characters.
