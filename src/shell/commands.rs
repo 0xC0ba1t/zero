@@ -32,6 +32,12 @@ pub static COMMANDS: &[Command] = &[
         about: "print its arguments",
         handler: echo,
     },
+    Command {
+        name: "help",
+        usage: "help",
+        about: "list the available commands",
+        handler: help,
+    },
 ];
 
 /// Looks up a command by name.
@@ -41,5 +47,22 @@ pub fn find(name: &str) -> Option<&'static Command> {
 
 fn echo(args: &[String]) -> Result<(), CommandError> {
     println!("{}", args.join(" "));
+    Ok(())
+}
+
+/// Fails with a usage error if any arguments were given.
+fn expect_no_args(args: &[String]) -> Result<(), CommandError> {
+    if args.is_empty() {
+        Ok(())
+    } else {
+        Err(CommandError::Usage)
+    }
+}
+
+fn help(args: &[String]) -> Result<(), CommandError> {
+    expect_no_args(args)?;
+    for command in COMMANDS {
+        println!("  {:<11}{}", command.name, command.about);
+    }
     Ok(())
 }
