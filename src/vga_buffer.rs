@@ -219,3 +219,18 @@ fn test_println_output() {
         }
     });
 }
+
+#[test_case]
+fn test_backspace_erases_last_char() {
+    use core::fmt::Write;
+    use x86_64::instructions::interrupts;
+
+    interrupts::without_interrupts(|| {
+        let mut writer = WRITER.lock();
+        writeln!(writer, "\nabc\u{8}").expect("writeln failed");
+        let row = BUFFER_HEIGHT - 2;
+        assert_eq!(char::from(writer.buffer.chars[row][0].read().ascii_character), 'a');
+        assert_eq!(char::from(writer.buffer.chars[row][1].read().ascii_character), 'b');
+        assert_eq!(char::from(writer.buffer.chars[row][2].read().ascii_character), ' ');
+    });
+}
