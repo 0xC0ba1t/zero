@@ -34,8 +34,8 @@ pub static COMMANDS: &[Command] = &[
     },
     Command {
         name: "help",
-        usage: "help",
-        about: "list the available commands",
+        usage: "help [command]",
+        about: "list commands, or show how to use one",
         handler: help,
     },
 ];
@@ -60,9 +60,19 @@ fn expect_no_args(args: &[String]) -> Result<(), CommandError> {
 }
 
 fn help(args: &[String]) -> Result<(), CommandError> {
-    expect_no_args(args)?;
-    for command in COMMANDS {
-        println!("  {:<11}{}", command.name, command.about);
+    match args {
+        [] => {
+            for command in COMMANDS {
+                println!("  {:<11}{}", command.name, command.about);
+            }
+            Ok(())
+        }
+        [name] => {
+            let command = find(name).ok_or(CommandError::Failed("no such command"))?;
+            println!("usage: {}", command.usage);
+            println!("{}", command.about);
+            Ok(())
+        }
+        _ => Err(CommandError::Usage),
     }
-    Ok(())
 }

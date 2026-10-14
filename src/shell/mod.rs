@@ -79,3 +79,13 @@ fn test_execute_echo() {
 fn test_execute_reports_parse_errors() {
     assert_eq!(execute("echo \"oops"), Outcome::ParseError);
 }
+
+#[test_case]
+fn test_execute_bad_usage() {
+    assert_eq!(execute("help a b"), Outcome::Usage);
+}
+
+#[test_case]
+fn test_execute_help_for_unknown_command() {
+    assert_eq!(execute("help frobnicate"), Outcome::Failed);
+}
