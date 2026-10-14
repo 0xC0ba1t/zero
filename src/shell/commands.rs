@@ -234,3 +234,16 @@ pub fn complete(prefix: &str) -> Option<&'static str> {
         Some(first.name)
     }
 }
+
+#[test_case]
+fn test_complete_unique_prefix() {
+    assert_eq!(complete("ec"), Some("echo"));
+    assert_eq!(complete("shut"), Some("shutdown"));
+}
+
+#[test_case]
+fn test_complete_rejects_ambiguous_or_unknown_prefixes() {
+    assert_eq!(complete("c"), None); // clear, color
+    assert_eq!(complete("zzz"), None);
+    assert_eq!(complete(""), None);
+}
