@@ -84,3 +84,15 @@ pub enum Stmt {
     Return,
     Exit,
 }
+
+/// A compiled script.
+#[derive(Debug)]
+pub struct Program {
+    pub stmts: Vec<Stmt>,
+    /// The source line of every statement, for error messages.
+    pub lines: Vec<usize>,
+    /// Variable names; the position is the variable's slot.
+    pub names: Vec<String>,
+    /// Initial values of the first slots (the predefined constants).
+    pub constants: Vec<i32>,
+}
