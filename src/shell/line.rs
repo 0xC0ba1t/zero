@@ -22,4 +22,9 @@ impl LineEditor {
     pub fn insert(&mut self, c: char) {
         self.buf.push(c);
     }
+
+    /// Removes the last character. Returns `false` if the line was already empty.
+    pub fn erase(&mut self) -> bool {
+        self.buf.pop().is_some()
+    }
 }
