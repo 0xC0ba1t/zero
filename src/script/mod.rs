@@ -11,6 +11,7 @@ pub mod host;
 pub mod lexer;
 #[cfg(test)]
 mod mock;
+pub mod vm;
 
 use alloc::string::String;
 use core::fmt;
