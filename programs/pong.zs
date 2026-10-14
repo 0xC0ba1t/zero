@@ -87,6 +87,14 @@ while running
   if k == 'q' || k == ESC
     running = 0
   end
+  if k == 'w' || k == 'W' || k == UP
+    py = py - 2
+  end
+  if k == 's' || k == 'S' || k == DOWN
+    py = py + 2
+  end
+  py = max(py, top)
+  py = min(py, bottom - height + 1)
 
   call draw_paddles
   call draw_ball
