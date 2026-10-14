@@ -4,6 +4,8 @@
 //! ring buffer and the shell pops them off again. Nothing in here allocates,
 //! so it is safe to use from inside an interrupt handler.
 
+use spin::Mutex;
+
 /// A key press that the shell cares about.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Key {
@@ -61,4 +63,18 @@ impl<const N: usize> RingBuffer<N> {
         self.len -= 1;
         Some(key)
     }
+}
+
+/// Capacity of the global input queue.
+const QUEUE_SIZE: usize = 128;
+
+/// Keys waiting to be consumed by the shell.
+static INPUT: Mutex<RingBuffer<QUEUE_SIZE>> = Mutex::new(RingBuffer::new());
+
+/// Queues a key, silently dropping it if the queue is full.
+///
+/// This is called from the keyboard interrupt handler, which runs with
+/// interrupts disabled.
+pub fn push_key(key: Key) {
+    let _ = INPUT.lock().push(key);
 }
