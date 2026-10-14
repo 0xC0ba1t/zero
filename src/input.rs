@@ -37,4 +37,17 @@ impl<const N: usize> RingBuffer<N> {
     pub fn is_full(&self) -> bool {
         self.len == N
     }
+
+    /// Appends a key to the back of the queue.
+    ///
+    /// Hands the key back as the error value if the queue is full.
+    pub fn push(&mut self, key: Key) -> Result<(), Key> {
+        if self.is_full() {
+            return Err(key);
+        }
+        let tail = (self.head + self.len) % N;
+        self.buf[tail] = key;
+        self.len += 1;
+        Ok(())
+    }
 }
