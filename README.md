@@ -29,3 +29,16 @@ Run it with `make run` (needs QEMU and `bootimage`).
 | `panic` | panic on purpose |
 | `reboot` | restart the machine |
 | `shutdown` | power off (virtual machines only) |
+
+### Keys
+
+| key | action |
+| --- | ------ |
+| Backspace | erase the last character |
+| Up / Down | browse the history |
+| Tab | complete the command name |
+| Ctrl+C | abandon the current line |
+| Ctrl+L | clear the screen |
+| Ctrl+U | erase the whole line |
+
+Lines are limited to 72 characters so they never wrap onto a second row.
