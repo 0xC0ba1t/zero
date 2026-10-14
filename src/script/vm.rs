@@ -198,6 +198,19 @@ impl<'a> Vm<'a> {
                 }
             }
             Stmt::EndWhile { start } => next = *start,
+            Stmt::Sub { end } => next = *end,
+            Stmt::Call(target) => {
+                if self.calls.len() >= MAX_CALL_DEPTH {
+                    return Err("call stack overflow");
+                }
+                self.calls.push(self.pc + 1);
+                next = *target;
+            }
+            Stmt::EndSub | Stmt::Return => match self.calls.pop() {
+                Some(return_to) => next = return_to,
+                // `return` outside of a sub ends the program
+                None => return Ok(false),
+            },
             _ => return Err("not implemented yet"),
         }
 
