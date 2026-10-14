@@ -23,6 +23,7 @@ pub mod input;
 pub mod time;
 pub mod power;
 pub mod shell;
+pub mod script;
 
 pub trait Testable {
     fn run(&self) -> ();
@@ -80,6 +81,7 @@ pub fn init() {
     gdt::init();
     interrupts::init_idt();
     unsafe { interrupts::PICS.lock().initialize() };
+    time::init_pit();
     x86_64::instructions::interrupts::enable();
 }
 

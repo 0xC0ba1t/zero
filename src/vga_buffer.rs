@@ -65,6 +65,11 @@ impl Color {
             .find(|entry| entry.0.eq_ignore_ascii_case(name))
             .map(|entry| entry.1)
     }
+
+    /// Returns the color with the given VGA palette index (only the low 4 bits count).
+    pub fn from_index(index: u8) -> Color {
+        Color::NAMES[(index & 0x0F) as usize].1
+    }
 }
 
 /// A combination of a foreground and a background color.
@@ -131,6 +136,21 @@ impl Writer {
                 self.column_position += 1;
             }
         }
+    }
+
+    /// Writes a raw byte at any position using the current color.
+    ///
+    /// Positions outside the screen are ignored. Unlike `write_byte` this does
+    /// not move the cursor, which makes it suitable for drawing.
+    pub fn put_at(&mut self, column: usize, row: usize, byte: u8) {
+        if column >= BUFFER_WIDTH || row >= BUFFER_HEIGHT {
+            return;
+        }
+        let color_code = self.color_code;
+        self.buffer.chars[row][column].write(ScreenChar {
+            ascii_character: byte,
+            color_code,
+        });
     }
 
     /// Erases the character left of the cursor on the current row.
@@ -272,6 +292,67 @@ pub fn set_color(foreground: Color, background: Color) {
     });
 }
 
+/// Draws a raw byte at `(column, row)` through the global `WRITER`.
+/// `(0, 0)` is the top left corner of the screen.
+pub fn put_at(column: i32, row: i32, byte: u8) {
+    use x86_64::instructions::interrupts;
+
+    if column < 0 || row < 0 {
+        return;
+    }
+    interrupts::without_interrupts(|| {
+        WRITER.lock().put_at(column as usize, row as usize, byte);
+    });
+}
+
+/// Draws `text` starting at `(column, row)`. Characters outside the printable
+/// ASCII range show up as a filled square.
+pub fn write_at(column: i32, row: i32, text: &str) {
+    for (offset, byte) in text.bytes().enumerate() {
+        let byte = match byte {
+            0x20..=0x7e => byte,
+            _ => 0xfe,
+        };
+        put_at(column.saturating_add(offset as i32), row, byte);
+    }
+}
+
+/// Shows or hides the blinking hardware cursor.
+pub fn set_cursor_visible(visible: bool) {
+    use x86_64::instructions::interrupts;
+    use x86_64::instructions::port::Port;
+
+    interrupts::without_interrupts(|| unsafe {
+        let mut index: Port<u8> = Port::new(0x3D4);
+        let mut data: Port<u8> = Port::new(0x3D5);
+        if visible {
+            index.write(0x0A); // cursor start scanline
+            data.write(14);
+            index.write(0x0B); // cursor end scanline
+            data.write(15);
+        } else {
+            index.write(0x0A);
+            data.write(0x20); // bit 5 turns the cursor off
+        }
+    });
+}
+
+/// Returns the current text color as a raw VGA attribute byte.
+pub fn color_code() -> u8 {
+    use x86_64::instructions::interrupts;
+
+    interrupts::without_interrupts(|| WRITER.lock().color_code.0)
+}
+
+/// Restores a color previously returned by `color_code`.
+pub fn set_color_code(code: u8) {
+    use x86_64::instructions::interrupts;
+
+    interrupts::without_interrupts(|| {
+        WRITER.lock().color_code = ColorCode(code);
+    });
+}
+
 #[test_case]
 fn test_println_simple() {
     println!("test_println_simple output");
@@ -320,4 +401,50 @@ fn test_color_from_name() {
     assert_eq!(Color::from_name("red"), Some(Color::Red));
     assert_eq!(Color::from_name("LightBlue"), Some(Color::LightBlue));
     assert_eq!(Color::from_name("chartreuse"), None);
+}
+
+#[test_case]
+fn test_put_at_draws_without_moving_the_cursor() {
+    use x86_64::instructions::interrupts;
+
+    interrupts::without_interrupts(|| {
+        let mut writer = WRITER.lock();
+        let column = writer.column_position;
+        writer.put_at(5, 3, b'Q');
+        assert_eq!(char::from(writer.buffer.chars[3][5].read().ascii_character), 'Q');
+        assert_eq!(writer.column_position, column);
+        // off-screen positions are ignored instead of panicking
+        writer.put_at(BUFFER_WIDTH, 0, b'X');
+        writer.put_at(0, BUFFER_HEIGHT, b'X');
+    });
+}
+
+#[test_case]
+fn test_write_at_draws_a_string() {
+    use x86_64::instructions::interrupts;
+
+    write_at(10, 4, "hi");
+    interrupts::without_interrupts(|| {
+        let writer = WRITER.lock();
+        assert_eq!(char::from(writer.buffer.chars[4][10].read().ascii_character), 'h');
+        assert_eq!(char::from(writer.buffer.chars[4][11].read().ascii_character), 'i');
+    });
+}
+
+#[test_case]
+fn test_color_from_index() {
+    assert_eq!(Color::from_index(0), Color::Black);
+    assert_eq!(Color::from_index(14), Color::Yellow);
+    assert_eq!(Color::from_index(15), Color::White);
+    // only the low four bits are used
+    assert_eq!(Color::from_index(16), Color::Black);
+}
+
+#[test_case]
+fn test_color_code_round_trip() {
+    let saved = color_code();
+    set_color(Color::Red, Color::Black);
+    assert_eq!(color_code(), 0x04);
+    set_color_code(saved);
+    assert_eq!(color_code(), saved);
 }

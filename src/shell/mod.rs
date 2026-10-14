@@ -115,6 +115,7 @@ pub fn execute(line: &str) -> Outcome {
             println!("{}: {}", command.name, reason);
             Outcome::Failed
         }
+        Err(CommandError::Reported) => Outcome::Failed,
     }
 }
 
@@ -176,4 +177,35 @@ fn test_execute_color() {
     assert_eq!(execute("color chartreuse"), Outcome::Failed);
     assert_eq!(execute("color black"), Outcome::Failed);
     assert_eq!(execute("color a b"), Outcome::Usage);
+}
+
+#[test_case]
+fn test_execute_eval() {
+    assert_eq!(execute("eval 2 + 3 * 4"), Outcome::Success);
+    assert_eq!(execute("eval 2 +"), Outcome::Failed);
+    assert_eq!(execute("eval"), Outcome::Usage);
+}
+
+#[test_case]
+fn test_execute_exec() {
+    assert_eq!(
+        execute("exec \"let i = 0; while i < 3; i = i + 1; end; print i\""),
+        Outcome::Success
+    );
+    assert_eq!(execute("exec \"print 1 / 0\""), Outcome::Failed);
+}
+
+#[test_case]
+fn test_execute_run_and_programs() {
+    assert_eq!(execute("programs"), Outcome::Success);
+    assert_eq!(execute("run hello"), Outcome::Success);
+    assert_eq!(execute("run no_such_program"), Outcome::Failed);
+    assert_eq!(execute("run"), Outcome::Usage);
+}
+
+#[test_case]
+fn test_execute_src() {
+    assert_eq!(execute("src hello"), Outcome::Success);
+    assert_eq!(execute("src no_such_program"), Outcome::Failed);
+    assert_eq!(execute("src"), Outcome::Usage);
 }

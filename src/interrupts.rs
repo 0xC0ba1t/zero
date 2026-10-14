@@ -99,7 +99,13 @@ extern "x86-interrupt" fn keyboard_interrupt_handler(
     if let Ok(Some(key_event)) = keyboard.add_byte(scancode) {
         if let Some(key) = keyboard.process_keyevent(key_event) {
             match key {
-                DecodedKey::Unicode(character) => input::push_key(Key::Char(character)),
+                DecodedKey::Unicode(character) => {
+                    // ctrl+c also stops a running script
+                    if character == '\u{3}' {
+                        input::request_interrupt();
+                    }
+                    input::push_key(Key::Char(character));
+                }
                 DecodedKey::RawKey(KeyCode::ArrowUp) => input::push_key(Key::Up),
                 DecodedKey::RawKey(KeyCode::ArrowDown) => input::push_key(Key::Down),
                 DecodedKey::RawKey(_) => {}

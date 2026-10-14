@@ -10,6 +10,8 @@ pub enum CommandError {
     Usage,
     /// The command failed for the given reason.
     Failed(&'static str),
+    /// The command failed and has already printed its own message.
+    Reported,
 }
 
 /// Signature shared by every built-in. It receives the arguments that follow
@@ -97,6 +99,36 @@ pub static COMMANDS: &[Command] = &[
         usage: "history",
         about: "list the lines you entered",
         handler: history,
+    },
+    Command {
+        name: "run",
+        usage: "run <program>",
+        about: "run a built-in script (see programs)",
+        handler: run,
+    },
+    Command {
+        name: "programs",
+        usage: "programs",
+        about: "list the built-in scripts",
+        handler: programs,
+    },
+    Command {
+        name: "exec",
+        usage: "exec <script>",
+        about: "run a one-line script, `;` separates statements",
+        handler: exec,
+    },
+    Command {
+        name: "eval",
+        usage: "eval <expression>",
+        about: "print the value of an expression",
+        handler: eval,
+    },
+    Command {
+        name: "src",
+        usage: "src <program>",
+        about: "show the source of a built-in script",
+        handler: src,
     },
 ];
 
@@ -215,6 +247,63 @@ fn history(args: &[String]) -> Result<(), CommandError> {
     expect_no_args(args)?;
     for (index, line) in super::history::HISTORY.lock().iter().enumerate() {
         println!("{:>3}  {}", index + 1, line);
+    }
+    Ok(())
+}
+
+/// Runs script source on the real screen and keyboard, reporting errors.
+fn run_script(source: &str) -> Result<(), CommandError> {
+    let mut host = crate::script::kernel_host::KernelHost::new();
+    match crate::script::run(source, &mut host) {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            println!("script error: {}", error);
+            Err(CommandError::Reported)
+        }
+    }
+}
+
+fn run(args: &[String]) -> Result<(), CommandError> {
+    let name = match args {
+        [name] => name,
+        _ => return Err(CommandError::Usage),
+    };
+    let program = crate::script::programs::find(name)
+        .ok_or(CommandError::Failed("no such program, see `programs`"))?;
+    run_script(program.source)
+}
+
+fn programs(args: &[String]) -> Result<(), CommandError> {
+    expect_no_args(args)?;
+    for program in crate::script::programs::PROGRAMS {
+        println!("  {:<11}{}", program.name, program.about);
+    }
+    Ok(())
+}
+
+fn exec(args: &[String]) -> Result<(), CommandError> {
+    if args.is_empty() {
+        return Err(CommandError::Usage);
+    }
+    run_script(&args.join(" "))
+}
+
+fn eval(args: &[String]) -> Result<(), CommandError> {
+    if args.is_empty() {
+        return Err(CommandError::Usage);
+    }
+    run_script(&alloc::format!("print {}", args.join(" ")))
+}
+
+fn src(args: &[String]) -> Result<(), CommandError> {
+    let name = match args {
+        [name] => name,
+        _ => return Err(CommandError::Usage),
+    };
+    let program = crate::script::programs::find(name)
+        .ok_or(CommandError::Failed("no such program, see `programs`"))?;
+    for line in program.source.lines() {
+        println!("{}", line);
     }
     Ok(())
 }
