@@ -27,6 +27,8 @@ pub enum Edit {
     Complete,
     /// The user pressed ctrl+c and wants to abandon the line.
     Cancelled,
+    /// The user pressed ctrl+l and wants the screen cleared.
+    ClearScreen,
 }
 
 /// Collects the characters of the line being typed.
@@ -92,6 +94,7 @@ impl LineEditor {
             }
             Key::Char('\t') => Edit::Complete,
             Key::Char('\u{3}') => Edit::Cancelled,
+            Key::Char('\u{c}') => Edit::ClearScreen,
             Key::Up => Edit::Older,
             Key::Down => Edit::Newer,
             _ => Edit::Ignored,
@@ -174,4 +177,10 @@ fn test_line_editor_maps_tab_to_complete() {
 fn test_line_editor_maps_ctrl_c_to_cancel() {
     let mut editor = LineEditor::new();
     assert_eq!(editor.handle(Key::Char('\u{3}')), Edit::Cancelled);
+}
+
+#[test_case]
+fn test_line_editor_maps_ctrl_l_to_clear_screen() {
+    let mut editor = LineEditor::new();
+    assert_eq!(editor.handle(Key::Char('\u{c}')), Edit::ClearScreen);
 }

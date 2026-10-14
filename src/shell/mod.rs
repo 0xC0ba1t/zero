@@ -7,6 +7,7 @@ mod parser;
 
 use alloc::string::String;
 use crate::input;
+use crate::vga_buffer;
 use crate::{print, println};
 use commands::CommandError;
 use history::HISTORY;
@@ -53,6 +54,10 @@ pub fn run() -> ! {
                 println!("^C");
                 let _ = editor.take();
                 print!("{}", PROMPT);
+            }
+            Edit::ClearScreen => {
+                vga_buffer::clear_screen();
+                print!("{}{}", PROMPT, editor.as_str());
             }
             Edit::Ignored => {}
         }
