@@ -12,6 +12,10 @@ use x86_64::instructions::interrupts;
 pub enum Key {
     /// A decoded character (`\n` is enter, `\u{8}` is backspace).
     Char(char),
+    /// The up arrow.
+    Up,
+    /// The down arrow.
+    Down,
 }
 
 /// A fixed-capacity FIFO queue of keys, backed by a plain array.
