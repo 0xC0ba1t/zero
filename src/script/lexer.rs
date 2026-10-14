@@ -115,6 +115,50 @@ pub fn tokenize(source: &str) -> Result<Vec<Spanned>, ScriptError> {
                     line,
                 });
             }
+            '+' | '-' | '*' | '/' | '%' | '(' | ')' | ',' => {
+                chars.next();
+                let token = match c {
+                    '+' => Token::Plus,
+                    '-' => Token::Minus,
+                    '*' => Token::Star,
+                    '/' => Token::Slash,
+                    '%' => Token::Percent,
+                    '(' => Token::LParen,
+                    ')' => Token::RParen,
+                    _ => Token::Comma,
+                };
+                tokens.push(Spanned { token, line });
+            }
+            '=' | '!' | '<' | '>' => {
+                chars.next();
+                // `==`, `!=`, `<=` and `>=` have a second character
+                let with_eq = chars.peek() == Some(&'=');
+                if with_eq {
+                    chars.next();
+                }
+                let token = match (c, with_eq) {
+                    ('=', false) => Token::Eq,
+                    ('=', true) => Token::EqEq,
+                    ('!', false) => Token::Bang,
+                    ('!', true) => Token::NotEq,
+                    ('<', false) => Token::Lt,
+                    ('<', true) => Token::Le,
+                    ('>', false) => Token::Gt,
+                    _ => Token::Ge,
+                };
+                tokens.push(Spanned { token, line });
+            }
+            '&' | '|' => {
+                chars.next();
+                if chars.next() != Some(c) {
+                    return Err(ScriptError::new(
+                        line,
+                        &format!("expected {0}{0} (a single {0} is not an operator)", c),
+                    ));
+                }
+                let token = if c == '&' { Token::AndAnd } else { Token::OrOr };
+                tokens.push(Spanned { token, line });
+            }
             other => {
                 return Err(ScriptError::new(
                     line,
