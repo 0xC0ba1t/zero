@@ -80,3 +80,13 @@ else is true.
 
 The screen is 80 columns by 25 rows, with 0, 0 at the top left. Drawing
 outside the screen is ignored.
+
+## Adding a program
+
+There is no file system yet. Put a `.zs` file in `programs/` and list it in
+`src/script/programs.rs`, then rebuild.
+
+## Pong
+
+`run pong`: you are the left paddle. `w`/`s` or the arrow keys move, `q`
+quits. First to five wins. Where the ball hits your paddle decides its angle.
