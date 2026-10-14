@@ -102,3 +102,12 @@ fn test_line_editor_backspace() {
     let mut empty = LineEditor::new();
     assert_eq!(empty.handle(Key::Char('\u{8}')), Edit::Ignored);
 }
+
+#[test_case]
+fn test_line_editor_submit_takes_the_line() {
+    let mut editor = LineEditor::new();
+    type_str(&mut editor, "ab");
+    assert_eq!(editor.handle(Key::Char('\n')), Edit::Submitted);
+    assert_eq!(editor.take(), "ab");
+    assert_eq!(editor.as_str(), "");
+}
