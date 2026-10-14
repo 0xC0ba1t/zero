@@ -2,10 +2,26 @@
 
 use alloc::string::String;
 use alloc::vec::Vec;
+use core::fmt;
+
+/// Why a command line could not be parsed.
+#[derive(Debug, PartialEq, Eq)]
+pub enum ParseError {
+    /// A `"` was opened but never closed.
+    UnterminatedQuote,
+}
+
+impl fmt::Display for ParseError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            ParseError::UnterminatedQuote => write!(f, "unterminated quote"),
+        }
+    }
+}
 
 /// Splits `line` into words. Words are separated by whitespace, except inside
 /// double quotes, which group several words (or none, for an empty argument).
-pub fn parse(line: &str) -> Vec<String> {
+pub fn parse(line: &str) -> Result<Vec<String>, ParseError> {
     let mut args = Vec::new();
     let mut current = String::new();
     let mut in_quotes = false;
@@ -30,31 +46,40 @@ pub fn parse(line: &str) -> Vec<String> {
             }
         }
     }
+
+    if in_quotes {
+        return Err(ParseError::UnterminatedQuote);
+    }
     if in_word {
         args.push(current);
     }
-    args
+    Ok(args)
 }
 
 #[test_case]
 fn test_parse_splits_on_whitespace() {
-    let args = parse("  echo   hello  world ");
+    let args = parse("  echo   hello  world ").unwrap();
     assert_eq!(args, ["echo", "hello", "world"]);
 }
 
 #[test_case]
 fn test_parse_blank_line() {
-    assert!(parse("   ").is_empty());
+    assert!(parse("   ").unwrap().is_empty());
 }
 
 #[test_case]
 fn test_parse_quoted_argument() {
-    let args = parse("echo \"hello   world\" end");
+    let args = parse("echo \"hello   world\" end").unwrap();
     assert_eq!(args, ["echo", "hello   world", "end"]);
 }
 
 #[test_case]
 fn test_parse_empty_quotes() {
-    let args = parse("a \"\" b");
+    let args = parse("a \"\" b").unwrap();
     assert_eq!(args, ["a", "", "b"]);
+}
+
+#[test_case]
+fn test_parse_unterminated_quote() {
+    assert_eq!(parse("echo \"oops"), Err(ParseError::UnterminatedQuote));
 }
