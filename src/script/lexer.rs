@@ -100,6 +100,21 @@ pub fn tokenize(source: &str) -> Result<Vec<Spanned>, ScriptError> {
                     line,
                 });
             }
+            c if c.is_ascii_alphabetic() || c == '_' => {
+                let mut name = String::new();
+                while let Some(&c) = chars.peek() {
+                    if c.is_ascii_alphanumeric() || c == '_' {
+                        name.push(c);
+                        chars.next();
+                    } else {
+                        break;
+                    }
+                }
+                tokens.push(Spanned {
+                    token: Token::Ident(name),
+                    line,
+                });
+            }
             other => {
                 return Err(ScriptError::new(
                     line,
