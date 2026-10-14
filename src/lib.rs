@@ -20,6 +20,7 @@ pub mod gdt;
 pub mod memory;
 pub mod allocator;
 pub mod input;
+pub mod time;
 
 pub trait Testable {
     fn run(&self) -> ();
