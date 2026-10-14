@@ -160,3 +160,9 @@ fn test_line_editor_set_replaces_the_line() {
     editor.set("new line");
     assert_eq!(editor.as_str(), "new line");
 }
+
+#[test_case]
+fn test_line_editor_maps_tab_to_complete() {
+    let mut editor = LineEditor::new();
+    assert_eq!(editor.handle(Key::Char('\t')), Edit::Complete);
+}
