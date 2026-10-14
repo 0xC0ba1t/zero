@@ -300,6 +300,18 @@ pub fn put_at(column: i32, row: i32, byte: u8) {
     });
 }
 
+/// Draws `text` starting at `(column, row)`. Characters outside the printable
+/// ASCII range show up as a filled square.
+pub fn write_at(column: i32, row: i32, text: &str) {
+    for (offset, byte) in text.bytes().enumerate() {
+        let byte = match byte {
+            0x20..=0x7e => byte,
+            _ => 0xfe,
+        };
+        put_at(column.saturating_add(offset as i32), row, byte);
+    }
+}
+
 #[test_case]
 fn test_println_simple() {
     println!("test_println_simple output");
