@@ -51,6 +51,43 @@ impl<'a> Vm<'a> {
         }
     }
 
+    /// Returns the next pseudo random number (xorshift32).
+    fn next_random(&mut self) -> u32 {
+        let mut x = self.rng;
+        x ^= x << 13;
+        x ^= x >> 17;
+        x ^= x << 5;
+        self.rng = x;
+        x
+    }
+
+    /// Calls a built-in function. The compiler already checked the argument count.
+    fn call(&mut self, func: Func, args: &[Expr], host: &mut dyn Host) -> Result<i32, &'static str> {
+        match func {
+            Func::Rand => {
+                let limit = self.eval(&args[0], host)?;
+                if limit <= 0 {
+                    return Err("rand needs a positive limit");
+                }
+                Ok((self.next_random() % limit as u32) as i32)
+            }
+            Func::Abs => Ok(self.eval(&args[0], host)?.wrapping_abs()),
+            Func::Min => {
+                let a = self.eval(&args[0], host)?;
+                let b = self.eval(&args[1], host)?;
+                Ok(a.min(b))
+            }
+            Func::Max => {
+                let a = self.eval(&args[0], host)?;
+                let b = self.eval(&args[1], host)?;
+                Ok(a.max(b))
+            }
+            Func::Key => Ok(host.key()),
+            Func::GetKey => Ok(host.wait_key()),
+            Func::Ticks => Ok(host.ticks() as i32),
+        }
+    }
+
     /// Evaluates an expression.
     fn eval(&mut self, expr: &Expr, host: &mut dyn Host) -> Result<i32, &'static str> {
         Ok(match expr {
@@ -105,7 +142,7 @@ impl<'a> Vm<'a> {
                     }
                 }
             }
-            Expr::Call(..) => return Err("functions are not supported yet"),
+            Expr::Call(func, args) => self.call(*func, args, host)?,
         })
     }
 
