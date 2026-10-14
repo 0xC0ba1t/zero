@@ -15,3 +15,19 @@ pub fn reboot() -> ! {
     }
     hlt_loop()
 }
+
+/// Powers the machine off.
+///
+/// This only works on virtual machines (QEMU and Bochs); on real hardware the
+/// writes are ignored and the CPU just halts.
+pub fn shutdown() -> ! {
+    unsafe {
+        // ACPI PM1a control port as used by QEMU (SLP_EN | SLP_TYP)
+        let mut qemu: Port<u16> = Port::new(0x604);
+        qemu.write(0x2000);
+        // older QEMU versions and Bochs
+        let mut bochs: Port<u16> = Port::new(0xB004);
+        bochs.write(0x2000);
+    }
+    hlt_loop()
+}
