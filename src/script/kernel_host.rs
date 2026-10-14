@@ -39,6 +39,15 @@ fn key_code(key: Key) -> i32 {
     }
 }
 
+impl Drop for KernelHost {
+    /// Puts the screen back the way the shell expects it.
+    fn drop(&mut self) {
+        vga_buffer::set_color_code(self.saved_color);
+        vga_buffer::set_cursor_visible(true);
+        input::take_interrupt();
+    }
+}
+
 impl Host for KernelHost {
     fn clear(&mut self) {
         self.enter_graphics();
