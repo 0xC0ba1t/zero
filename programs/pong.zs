@@ -88,23 +88,27 @@ sub deflect
     dy = -1
   end
   if off == 2
-    dy = 0
+    dy = rand(3) - 1
   end
   if off > 2
     dy = 1
   end
+  delay = max(delay - 1, 20)
 end
 
 sub after_point
   call draw_score
   bx = 40
   by = 12
+  dy = rand(3) - 1
+  delay = 45
   sleep 600
   if you >= win_score || cpu >= win_score
     running = 0
   end
 end
 
+dy = rand(3) - 1
 call draw_field
 text 29, 12, "press any key to start"
 k = getkey()
