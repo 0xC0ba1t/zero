@@ -218,3 +218,19 @@ fn history(args: &[String]) -> Result<(), CommandError> {
     }
     Ok(())
 }
+
+/// Returns the name of the only command that starts with `prefix`, if there is exactly one.
+pub fn complete(prefix: &str) -> Option<&'static str> {
+    if prefix.is_empty() {
+        return None;
+    }
+    let mut matches = COMMANDS
+        .iter()
+        .filter(|command| command.name.starts_with(prefix));
+    let first = matches.next()?;
+    if matches.next().is_some() {
+        None
+    } else {
+        Some(first.name)
+    }
+}
