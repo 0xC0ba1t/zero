@@ -50,4 +50,15 @@ impl<const N: usize> RingBuffer<N> {
         self.len += 1;
         Ok(())
     }
+
+    /// Removes and returns the oldest key, if there is one.
+    pub fn pop(&mut self) -> Option<Key> {
+        if self.is_empty() {
+            return None;
+        }
+        let key = self.buf[self.head];
+        self.head = (self.head + 1) % N;
+        self.len -= 1;
+        Some(key)
+    }
 }
