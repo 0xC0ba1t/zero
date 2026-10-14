@@ -3,8 +3,10 @@
 use super::ast::*;
 use super::host::Host;
 use super::ScriptError;
+use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
+use core::fmt::Write;
 
 /// How deeply subs may call each other.
 const MAX_CALL_DEPTH: usize = 64;
@@ -146,6 +148,21 @@ impl<'a> Vm<'a> {
         })
     }
 
+    /// Renders the items of a `print` or `text` statement into one string.
+    fn render(&mut self, items: &[Item], host: &mut dyn Host) -> Result<String, &'static str> {
+        let mut text = String::new();
+        for item in items {
+            match item {
+                Item::Text(literal) => text.push_str(literal),
+                Item::Value(expr) => {
+                    let value = self.eval(expr, host)?;
+                    let _ = write!(text, "{}", value);
+                }
+            }
+        }
+        Ok(text)
+    }
+
     /// Executes one statement. Returns `Ok(false)` once the program is done.
     fn step(&mut self, host: &mut dyn Host) -> Result<bool, &'static str> {
         if host.interrupted() {
@@ -160,6 +177,14 @@ impl<'a> Vm<'a> {
 
         match stmt {
             Stmt::Exit => return Ok(false),
+            Stmt::Assign(slot, expr) => {
+                let value = self.eval(expr, host)?;
+                self.vars[*slot] = value;
+            }
+            Stmt::Print(items) => {
+                let text = self.render(items, host)?;
+                host.print(&text);
+            }
             _ => return Err("not implemented yet"),
         }
 
