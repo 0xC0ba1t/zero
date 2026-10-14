@@ -412,6 +412,38 @@ impl Compiler {
                 }
                 Ok(())
             }
+            "sub" => {
+                let name = self.expect_ident("a sub name")?;
+                self.end_of_statement()?;
+                if !self.blocks.is_empty() {
+                    return Err(self.error("subs can only be defined at the top level"));
+                }
+                if self.subs.iter().any(|(existing, _)| *existing == name) {
+                    return Err(self.error(&format!("a sub named '{}' already exists", name)));
+                }
+                let stmt = self.emit(Stmt::Sub { end: 0 });
+                self.subs.push((name, stmt + 1));
+                self.blocks.push(Block::Sub { stmt });
+                Ok(())
+            }
+            "call" => {
+                let name = self.expect_ident("a sub name")?;
+                self.end_of_statement()?;
+                let stmt = self.emit(Stmt::Call(0));
+                // the sub may be defined further down, so resolve it at the end
+                self.calls.push((stmt, name, self.line));
+                Ok(())
+            }
+            "return" => {
+                self.end_of_statement()?;
+                self.emit(Stmt::Return);
+                Ok(())
+            }
+            "exit" => {
+                self.end_of_statement()?;
+                self.emit(Stmt::Exit);
+                Ok(())
+            }
             _ => {
                 if self.peek() == Some(&Token::Eq) {
                     self.pos += 1;
