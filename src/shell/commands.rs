@@ -106,6 +106,12 @@ pub static COMMANDS: &[Command] = &[
         about: "run a built-in script (see programs)",
         handler: run,
     },
+    Command {
+        name: "programs",
+        usage: "programs",
+        about: "list the built-in scripts",
+        handler: programs,
+    },
 ];
 
 /// Looks up a command by name.
@@ -247,6 +253,14 @@ fn run(args: &[String]) -> Result<(), CommandError> {
     let program = crate::script::programs::find(name)
         .ok_or(CommandError::Failed("no such program, see `programs`"))?;
     run_script(program.source)
+}
+
+fn programs(args: &[String]) -> Result<(), CommandError> {
+    expect_no_args(args)?;
+    for program in crate::script::programs::PROGRAMS {
+        println!("  {:<11}{}", program.name, program.about);
+    }
+    Ok(())
 }
 
 /// Returns the name of the only command that starts with `prefix`, if there is exactly one.
