@@ -152,7 +152,18 @@ impl Compiler {
     }
 
     fn additive(&mut self) -> Result<Expr, ScriptError> {
-        self.multiplicative()
+        let mut left = self.multiplicative()?;
+        loop {
+            let op = match self.peek() {
+                Some(Token::Plus) => BinOp::Add,
+                Some(Token::Minus) => BinOp::Sub,
+                _ => break,
+            };
+            self.pos += 1;
+            let right = self.multiplicative()?;
+            left = Expr::Bin(op, Box::new(left), Box::new(right));
+        }
+        Ok(left)
     }
 
     fn multiplicative(&mut self) -> Result<Expr, ScriptError> {
