@@ -8,6 +8,7 @@
 pub mod ast;
 pub mod compiler;
 pub mod host;
+pub mod kernel_host;
 pub mod lexer;
 #[cfg(test)]
 mod mock;
