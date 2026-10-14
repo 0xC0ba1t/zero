@@ -118,3 +118,14 @@ fn test_ring_buffer_rejects_push_when_full() {
     assert!(queue.is_full());
     assert_eq!(queue.push(Key::Char('c')), Err(Key::Char('c')));
 }
+
+#[test_case]
+fn test_ring_buffer_wraps_around() {
+    let mut queue: RingBuffer<3> = RingBuffer::new();
+    for round in 0..10u8 {
+        let c = (b'a' + round) as char;
+        queue.push(Key::Char(c)).unwrap();
+        assert_eq!(queue.pop(), Some(Key::Char(c)));
+    }
+    assert!(queue.is_empty());
+}
