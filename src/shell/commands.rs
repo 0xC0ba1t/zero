@@ -38,6 +38,12 @@ pub static COMMANDS: &[Command] = &[
         about: "list commands, or show how to use one",
         handler: help,
     },
+    Command {
+        name: "clear",
+        usage: "clear",
+        about: "clear the screen",
+        handler: clear,
+    },
 ];
 
 /// Looks up a command by name.
@@ -75,4 +81,10 @@ fn help(args: &[String]) -> Result<(), CommandError> {
         }
         _ => Err(CommandError::Usage),
     }
+}
+
+fn clear(args: &[String]) -> Result<(), CommandError> {
+    expect_no_args(args)?;
+    crate::vga_buffer::clear_screen();
+    Ok(())
 }
