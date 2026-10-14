@@ -28,6 +28,10 @@ pub static PROGRAMS: &[Entry] = &[Entry {
     name: "bounce",
     about: "a bouncing ball (q to stop)",
     source: include_str!("../../programs/bounce.zs"),
+}, Entry {
+    name: "pong",
+    about: "pong against the computer (w/s or arrows, q quits)",
+    source: include_str!("../../programs/pong.zs"),
 }];
 
 /// Looks up a built-in script by name.
