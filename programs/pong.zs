@@ -13,6 +13,7 @@ let bx = 40
 let by = 12
 let dx = 1
 let dy = 0
+let off = 0
 let i = 0
 let k = 0
 let frame = 0
@@ -71,6 +72,19 @@ sub draw_ball
   plot bx, by, 'O'
 end
 
+# the ball bounces differently depending on where it hits the paddle
+sub deflect
+  if off < 2
+    dy = -1
+  end
+  if off == 2
+    dy = 0
+  end
+  if off > 2
+    dy = 1
+  end
+end
+
 call draw_field
 text 29, 12, "press any key to start"
 k = getkey()
@@ -106,6 +120,21 @@ while running
   end
   if by >= bottom && dy > 0
     dy = -1
+  end
+
+  if bx == left_x + 1 && dx < 0
+    off = by - py
+    if off >= 0 && off < height
+      dx = 1
+      call deflect
+    end
+  end
+  if bx == right_x - 1 && dx > 0
+    off = by - ay
+    if off >= 0 && off < height
+      dx = -1
+      call deflect
+    end
   end
 
   if bx <= 0 || bx >= WIDTH - 1
