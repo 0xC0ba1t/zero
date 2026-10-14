@@ -80,6 +80,12 @@ pub static COMMANDS: &[Command] = &[
         about: "panic on purpose",
         handler: crash,
     },
+    Command {
+        name: "reboot",
+        usage: "reboot",
+        about: "restart the machine",
+        handler: reboot,
+    },
 ];
 
 /// Looks up a command by name.
@@ -179,4 +185,10 @@ fn breakpoint(args: &[String]) -> Result<(), CommandError> {
 fn crash(args: &[String]) -> Result<(), CommandError> {
     expect_no_args(args)?;
     panic!("panic requested from the shell");
+}
+
+fn reboot(args: &[String]) -> Result<(), CommandError> {
+    expect_no_args(args)?;
+    println!("rebooting...");
+    crate::power::reboot()
 }
