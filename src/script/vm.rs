@@ -240,3 +240,127 @@ impl<'a> Vm<'a> {
         Ok(true)
     }
 }
+
+#[cfg(test)]
+use super::mock::MockHost;
+#[cfg(test)]
+use alloc::string::ToString;
+
+#[cfg(test)]
+fn output_of(source: &str) -> String {
+    let mut host = MockHost::default();
+    super::run(source, &mut host).unwrap();
+    host.output
+}
+
+#[cfg(test)]
+fn error_of(source: &str) -> String {
+    let mut host = MockHost::default();
+    super::run(source, &mut host).unwrap_err().to_string()
+}
+
+#[test_case]
+fn test_arithmetic_and_precedence() {
+    assert_eq!(output_of("print 1 + 2 * 3"), "7\n");
+    assert_eq!(output_of("print (1 + 2) * 3"), "9\n");
+    assert_eq!(output_of("print 7 / 2"), "3\n");
+    assert_eq!(output_of("print 7 % 4"), "3\n");
+    assert_eq!(output_of("print -5 + 2"), "-3\n");
+    assert_eq!(output_of("print - 2 * 3"), "-6\n");
+}
+
+#[test_case]
+fn test_division_truncates_towards_zero() {
+    assert_eq!(output_of("print -7 / 2"), "-3\n");
+    assert_eq!(output_of("print -7 % 4"), "-3\n");
+}
+
+#[test_case]
+fn test_arithmetic_wraps_instead_of_panicking() {
+    assert_eq!(output_of("print 2147483647 + 1"), "-2147483648\n");
+}
+
+#[test_case]
+fn test_comparisons_and_logic() {
+    assert_eq!(output_of("print 1 < 2, \" \", 2 < 1"), "1 0\n");
+    assert_eq!(output_of("print 3 == 3, 3 != 3, 3 <= 3, 3 >= 4"), "1010\n");
+    assert_eq!(output_of("print 1 && 0 || 1"), "1\n");
+    assert_eq!(output_of("print !0, !5"), "10\n");
+}
+
+#[test_case]
+fn test_logic_short_circuits() {
+    // the right side would divide by zero if it were evaluated
+    assert_eq!(output_of("print 0 && 1 / 0"), "0\n");
+    assert_eq!(output_of("print 1 || 1 / 0"), "1\n");
+}
+
+#[test_case]
+fn test_literals_and_constants() {
+    assert_eq!(output_of("print 'A'"), "65\n");
+    assert_eq!(output_of("print WIDTH, \" \", HEIGHT, \" \", UP, \" \", DOWN"), "80 25 256 257\n");
+    assert_eq!(output_of("print ENTER, \" \", ESC"), "10 27\n");
+    assert_eq!(output_of("print"), "\n");
+}
+
+#[test_case]
+fn test_builtin_functions() {
+    assert_eq!(output_of("print min(3, 9), \" \", max(3, 9), \" \", abs(-4)"), "3 9 4\n");
+    let source = "let i = 0\nlet ok = 1\nwhile i < 200\n let r = rand(10)\n if r < 0 || r >= 10\n ok = 0\n end\n i = i + 1\nend\nprint ok";
+    assert_eq!(output_of(source), "1\n");
+}
+
+#[test_case]
+fn test_variables_and_loops() {
+    assert_eq!(output_of("let a = 5; a = a * 2; print a"), "10\n");
+    assert_eq!(output_of("print never_set"), "0\n");
+    let source = "let s = 0\nlet i = 1\nwhile i <= 10\n s = s + i\n i = i + 1\nend\nprint s";
+    assert_eq!(output_of(source), "55\n");
+    assert_eq!(output_of("let i = 0\nwhile i < 3\n i = i + 1\n print i\nend"), "1\n2\n3\n");
+}
+
+#[test_case]
+fn test_if_and_else() {
+    assert_eq!(output_of("if 1\n print \"yes\"\nelse\n print \"no\"\nend"), "yes\n");
+    assert_eq!(output_of("if 0\n print \"yes\"\nelse\n print \"no\"\nend"), "no\n");
+    assert_eq!(output_of("if 0\n print \"yes\"\nend\nprint \"done\""), "done\n");
+}
+
+#[test_case]
+fn test_subs() {
+    assert_eq!(output_of("sub hi\n print \"hi\"\nend\ncall hi\ncall hi"), "hi\nhi\n");
+    assert_eq!(output_of("call later\nsub later\n print \"x\"\nend"), "x\n");
+    assert_eq!(output_of("sub a\n print 1\n return\n print 2\nend\ncall a\nprint 3"), "1\n3\n");
+    assert_eq!(
+        output_of("sub a\n call b\n print \"a\"\nend\nsub b\n print \"b\"\nend\ncall a"),
+        "b\na\n"
+    );
+}
+
+#[test_case]
+fn test_exit_and_comments() {
+    assert_eq!(output_of("print 1\nexit\nprint 2"), "1\n");
+    assert_eq!(output_of("# nothing but a comment\nprint 1 # and a trailing one\n"), "1\n");
+}
+
+#[test_case]
+fn test_strings_and_escapes() {
+    assert_eq!(output_of("print \"a\\nb\", \"\\\"q\\\"\""), "a\nb\"q\"\n");
+}
+
+#[test_case]
+fn test_keys_and_drawing() {
+    let mut host = MockHost::default();
+    host.keys.push(119);
+    super::run("print key()\nprint key()", &mut host).unwrap();
+    assert_eq!(host.output, "119\n0\n");
+
+    let mut host = MockHost::default();
+    let source = "plot 1, 2, 'x'\ntext 3, 4, \"n=\", 5\ncolor 14\ncls\nsleep 100\nsleep 0";
+    super::run(source, &mut host).unwrap();
+    assert_eq!(host.plots, [(1, 2, 120)]);
+    assert_eq!(host.texts, [(3, 4, String::from("n=5"))]);
+    assert_eq!(host.colors, [14]);
+    assert_eq!(host.clears, 1);
+    assert_eq!(host.slept, 100);
+}
