@@ -146,3 +146,11 @@ fn test_global_queue_round_trip() {
     assert_eq!(read_key(), Key::Char('h'));
     assert_eq!(read_key(), Key::Char('i'));
 }
+
+#[test_case]
+fn test_try_read_key_does_not_block() {
+    assert_eq!(try_read_key(), None);
+    push_key(Key::Char('z'));
+    assert_eq!(try_read_key(), Some(Key::Char('z')));
+    assert_eq!(try_read_key(), None);
+}
