@@ -62,3 +62,34 @@ impl History {
         self.entries.iter().map(String::as_str)
     }
 }
+
+#[test_case]
+fn test_history_walks_back_and_forth() {
+    let mut history = History::new();
+    history.push("one");
+    history.push("two");
+    assert_eq!(history.older(), Some("two"));
+    assert_eq!(history.older(), Some("one"));
+    assert_eq!(history.older(), None);
+    assert_eq!(history.newer(), Some("two"));
+    assert_eq!(history.newer(), Some(""));
+    assert_eq!(history.newer(), None);
+}
+
+#[test_case]
+fn test_history_skips_blank_and_repeated_lines() {
+    let mut history = History::new();
+    history.push("");
+    history.push("ls");
+    history.push("ls");
+    assert_eq!(history.iter().count(), 1);
+}
+
+#[test_case]
+fn test_history_forgets_the_oldest_entries() {
+    let mut history = History::new();
+    for i in 0..MAX_ENTRIES + 4 {
+        history.push(if i % 2 == 0 { "even" } else { "odd" });
+    }
+    assert_eq!(history.iter().count(), MAX_ENTRIES);
+}
