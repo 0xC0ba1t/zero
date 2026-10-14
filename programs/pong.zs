@@ -9,8 +9,15 @@ let right_x = 76
 
 let py = 10
 let ay = 10
+let bx = 40
+let by = 12
+let dx = 1
+let dy = 0
 let i = 0
 let k = 0
+let frame = 0
+let delay = 45
+let running = 1
 
 sub draw_field
   cls
@@ -41,9 +48,50 @@ sub draw_paddles
   end
 end
 
+sub erase_paddles
+  i = 0
+  while i < height
+    plot left_x, py + i, ' '
+    plot right_x, ay + i, ' '
+    i = i + 1
+  end
+end
+
+sub erase_ball
+  if bx == 40 && by % 2 == 0
+    color 8
+    plot bx, by, 250
+  else
+    plot bx, by, ' '
+  end
+end
+
+sub draw_ball
+  color 14
+  plot bx, by, 'O'
+end
+
 call draw_field
 text 29, 12, "press any key to start"
 k = getkey()
 call draw_field
 call draw_paddles
+call draw_ball
+
+while running
+  call erase_paddles
+  call erase_ball
+
+  # your paddle
+  k = key()
+  if k == 'q' || k == ESC
+    running = 0
+  end
+
+  call draw_paddles
+  call draw_ball
+  frame = frame + 1
+  sleep delay
+end
+
 cls
