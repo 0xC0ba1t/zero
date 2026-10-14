@@ -546,3 +546,59 @@ pub fn compile(source: &str) -> Result<Program, ScriptError> {
     }
     compiler.finish()
 }
+
+#[cfg(test)]
+use alloc::string::ToString;
+
+#[cfg(test)]
+fn compile_error(source: &str) -> ScriptError {
+    compile(source).unwrap_err()
+}
+
+#[test_case]
+fn test_compile_counts_statements() {
+    let program = compile("let a = 1; print a; if a\nprint 2\nend").unwrap();
+    // assign, print, if, print, endif
+    assert_eq!(program.stmts.len(), 5);
+    assert_eq!(program.lines.len(), 5);
+}
+
+#[test_case]
+fn test_compile_gives_variables_slots_after_the_constants() {
+    let program = compile("x = 1\ny = x").unwrap();
+    assert_eq!(program.names.len(), CONSTANTS.len() + 2);
+    assert_eq!(program.constants.len(), CONSTANTS.len());
+}
+
+#[test_case]
+fn test_compile_resolves_forward_calls() {
+    let program = compile("call later\nsub later\nprint 1\nend").unwrap();
+    // the sub body starts right after the `sub` statement
+    assert_eq!(program.stmts[0], Stmt::Call(2));
+}
+
+#[test_case]
+fn test_compile_errors() {
+    assert_eq!(compile_error("frobnicate").to_string(), "line 1: unknown statement 'frobnicate'");
+    assert_eq!(compile_error("print (1 + 2").message, "expected )");
+    assert_eq!(compile_error("print 1 +").message, "expression expected");
+    assert_eq!(compile_error("print 1 2").message, "unexpected extra text");
+    assert_eq!(compile_error("let if = 3").message, "'if' is a keyword");
+    assert_eq!(compile_error("print foo(1)").message, "unknown function 'foo'");
+    assert_eq!(compile_error("print rand()").message, "rand takes 1 argument(s)");
+}
+
+#[test_case]
+fn test_compile_block_errors() {
+    assert_eq!(compile_error("print 1\nwhile 1\nprint 1").line, 2);
+    assert_eq!(compile_error("if 1\nprint 1").message, "this if is never closed with end");
+    assert_eq!(compile_error("end").message, "end without a matching if, while or sub");
+    assert_eq!(compile_error("else").message, "else without a matching if");
+    assert_eq!(compile_error("if 1\nelse\nelse\nend").message, "this if already has an else");
+    assert_eq!(compile_error("call nope").message, "no sub named 'nope'");
+    assert_eq!(compile_error("sub a\nend\nsub a\nend").message, "a sub named 'a' already exists");
+    assert_eq!(
+        compile_error("if 1\nsub a\nend\nend").message,
+        "subs can only be defined at the top level"
+    );
+}
