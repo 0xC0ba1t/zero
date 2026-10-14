@@ -56,6 +56,12 @@ pub static COMMANDS: &[Command] = &[
         about: "show the time since boot",
         handler: uptime,
     },
+    Command {
+        name: "mem",
+        usage: "mem",
+        about: "show heap usage",
+        handler: mem,
+    },
 ];
 
 /// Looks up a command by name.
@@ -111,5 +117,13 @@ fn uptime(args: &[String]) -> Result<(), CommandError> {
     expect_no_args(args)?;
     let (hours, minutes, seconds) = crate::time::split_hms(crate::time::uptime_secs());
     println!("up {}h {:02}m {:02}s", hours, minutes, seconds);
+    Ok(())
+}
+
+fn mem(args: &[String]) -> Result<(), CommandError> {
+    expect_no_args(args)?;
+    println!("heap: {} bytes total", crate::allocator::HEAP_SIZE);
+    println!("      {} bytes used", crate::allocator::heap_used());
+    println!("      {} bytes free", crate::allocator::heap_free());
     Ok(())
 }
