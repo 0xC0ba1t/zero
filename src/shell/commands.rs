@@ -50,6 +50,12 @@ pub static COMMANDS: &[Command] = &[
         about: "print the kernel name and version",
         handler: version,
     },
+    Command {
+        name: "uptime",
+        usage: "uptime",
+        about: "show the time since boot",
+        handler: uptime,
+    },
 ];
 
 /// Looks up a command by name.
@@ -98,5 +104,12 @@ fn clear(args: &[String]) -> Result<(), CommandError> {
 fn version(args: &[String]) -> Result<(), CommandError> {
     expect_no_args(args)?;
     println!("{} v{}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
+    Ok(())
+}
+
+fn uptime(args: &[String]) -> Result<(), CommandError> {
+    expect_no_args(args)?;
+    let (hours, minutes, seconds) = crate::time::split_hms(crate::time::uptime_secs());
+    println!("up {}h {:02}m {:02}s", hours, minutes, seconds);
     Ok(())
 }
