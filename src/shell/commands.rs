@@ -130,6 +130,36 @@ pub static COMMANDS: &[Command] = &[
         about: "show the source of a built-in script",
         handler: src,
     },
+    Command {
+        name: "ls",
+        usage: "ls [path]",
+        about: "list directory contents",
+        handler: ls,
+    },
+    Command {
+        name: "cat",
+        usage: "cat <path>",
+        about: "print file contents",
+        handler: cat,
+    },
+    Command {
+        name: "touch",
+        usage: "touch <path>",
+        about: "create a new empty file",
+        handler: touch,
+    },
+    Command {
+        name: "rm",
+        usage: "rm <path>",
+        about: "remove a file or directory",
+        handler: rm,
+    },
+    Command {
+        name: "mkdir",
+        usage: "mkdir <path>",
+        about: "create a new directory",
+        handler: mkdir,
+    },
 ];
 
 /// Looks up a command by name.
@@ -305,6 +335,71 @@ fn src(args: &[String]) -> Result<(), CommandError> {
     for line in program.source.lines() {
         println!("{}", line);
     }
+    Ok(())
+}
+
+fn ls(args: &[String]) -> Result<(), CommandError> {
+    let path = match args {
+        [] => "/",
+        [path] => path,
+        _ => return Err(CommandError::Usage),
+    };
+    let list = crate::fs::FILESYSTEM
+        .lock()
+        .list(path)
+        .map_err(|_| CommandError::Failed("no such directory"))?;
+    for item in list {
+        println!("{}", item);
+    }
+    Ok(())
+}
+
+fn cat(args: &[String]) -> Result<(), CommandError> {
+    let path = match args {
+        [path] => path,
+        _ => return Err(CommandError::Usage),
+    };
+    let data = crate::fs::FILESYSTEM
+        .lock()
+        .read_file(path)
+        .map_err(|_| CommandError::Failed("no such file"))?;
+    println!("{}", alloc::string::String::from_utf8_lossy(&data));
+    Ok(())
+}
+
+fn touch(args: &[String]) -> Result<(), CommandError> {
+    let path = match args {
+        [path] => path,
+        _ => return Err(CommandError::Usage),
+    };
+    crate::fs::FILESYSTEM
+        .lock()
+        .create_file(path)
+        .map_err(|_| CommandError::Failed("could not create file"))?;
+    Ok(())
+}
+
+fn rm(args: &[String]) -> Result<(), CommandError> {
+    let path = match args {
+        [path] => path,
+        _ => return Err(CommandError::Usage),
+    };
+    crate::fs::FILESYSTEM
+        .lock()
+        .delete(path)
+        .map_err(|_| CommandError::Failed("could not remove file/directory"))?;
+    Ok(())
+}
+
+fn mkdir(args: &[String]) -> Result<(), CommandError> {
+    let path = match args {
+        [path] => path,
+        _ => return Err(CommandError::Usage),
+    };
+    crate::fs::FILESYSTEM
+        .lock()
+        .create_dir(path)
+        .map_err(|_| CommandError::Failed("could not create directory"))?;
     Ok(())
 }
 

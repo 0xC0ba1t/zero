@@ -24,6 +24,7 @@ pub mod time;
 pub mod power;
 pub mod shell;
 pub mod script;
+pub mod fs;
 
 pub trait Testable {
     fn run(&self) -> ();
