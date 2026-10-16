@@ -31,6 +31,10 @@ pub enum Edit {
     ClearScreen,
     /// The user pressed ctrl+u and wants the whole line erased.
     KillLine,
+    /// The user pressed page up and wants to scroll the view up.
+    ScrollUp,
+    /// The user pressed page down and wants to scroll the view down.
+    ScrollDown,
 }
 
 /// Collects the characters of the line being typed.
@@ -100,6 +104,8 @@ impl LineEditor {
             Key::Char('\u{15}') => Edit::KillLine,
             Key::Up => Edit::Older,
             Key::Down => Edit::Newer,
+            Key::PageUp => Edit::ScrollUp,
+            Key::PageDown => Edit::ScrollDown,
             _ => Edit::Ignored,
         }
     }

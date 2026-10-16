@@ -17,6 +17,14 @@ pub enum Key {
     Up,
     /// The down arrow.
     Down,
+    /// The left arrow.
+    Left,
+    /// The right arrow.
+    Right,
+    /// Page Up.
+    PageUp,
+    /// Page Down.
+    PageDown,
 }
 
 /// A fixed-capacity FIFO queue of keys, backed by a plain array.
@@ -30,7 +38,7 @@ pub struct RingBuffer<const N: usize> {
 
 impl<const N: usize> RingBuffer<N> {
     /// Creates an empty queue.
-    pub const fn new() -> Self {
+    fn new() -> Self {
         RingBuffer {
             buf: [Key::Char('\0'); N],
             head: 0,

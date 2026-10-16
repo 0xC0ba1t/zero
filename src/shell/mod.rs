@@ -55,6 +55,8 @@ pub fn run() -> ! {
                 let _ = editor.take();
                 print!("{}", PROMPT);
             }
+            Edit::ScrollUp => crate::vga_buffer::scroll_up(),
+            Edit::ScrollDown => crate::vga_buffer::scroll_down(),
             Edit::ClearScreen => {
                 vga_buffer::clear_screen();
                 print!("{}{}", PROMPT, editor.as_str());

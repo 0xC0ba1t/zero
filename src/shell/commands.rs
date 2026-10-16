@@ -462,81 +462,109 @@ fn edit(args: &[String]) -> Result<(), CommandError> {
         fs.read_file(path).unwrap_or_default()
     };
 
-    println!("editing {}: (type :wq to save and quit, :q to quit without saving)", path);
-    println!("current content:");
-    println!("{}", alloc::string::String::from_utf8_lossy(&content));
-    println!("---");
+    // Fullscreen editor implementation
+    crate::vga_buffer::clear_screen();
 
     let mut lines: Vec<String> = alloc::string::String::from_utf8_lossy(&content)
         .lines()
         .map(String::from)
         .collect();
+    if lines.is_empty() { lines.push(String::new()); }
+
+    let mut cursor_x = 0;
+    let mut cursor_y = 0;
+    let mut scroll_y = 0;
 
     loop {
-        print!("> ");
-        let mut line = String::new();
-        loop {
-            let key = crate::input::read_key();
-            match key {
-                crate::input::Key::Char(c) => {
-                    if c == '\n' || c == '\r' {
-                        println!();
-                        break;
-                    } else if c == '\u{8}' {
-                        if !line.is_empty() {
-                            print!("\u{8}");
-                            line.pop();
-                        }
-                    } else {
-                        print!("{}", c);
-                        line.push(c);
-                    }
-                }
-                _ => {}
+        // Redraw screen
+        crate::vga_buffer::clear_screen();
+        for i in 0..25 {
+            if i < lines.len() {
+                let row_content = &lines[i];
+                crate::vga_buffer::write_at(0, i as i32, row_content);
             }
         }
 
-        if line == ":wq" {
-            let new_content = lines.join("\n").into_bytes();
-            crate::fs::FILESYSTEM
-                .lock()
-                .as_mut()
-                .ok_or(CommandError::Failed("fs not initialized"))?
-                .write_file(path, new_content)
-                .map_err(|_| CommandError::Failed("could not save file"))?;
-            println!("saved.");
-            break;
-        } else if line == ":q" {
-            println!("quit.");
-            break;
-        } else {
-            lines.push(line);
+        // Input loop
+        let key = crate::input::read_key();
+        match key {
+            crate::input::Key::Char(c) => {
+                if c == '\u{1b}' { // ESC to quit/save menu
+                    break;
+                } else if c == '\u{8}' {
+                    if cursor_x > 0 {
+                        lines[cursor_y].remove(cursor_x - 1);
+                        cursor_x -= 1;
+                    }
+                } else if c == '\n' {
+                    lines.insert(cursor_y + 1, lines[cursor_y].split_off(cursor_x));
+                    cursor_y += 1;
+                    cursor_x = 0;
+                } else {
+                    lines[cursor_y].insert(cursor_x, c);
+                    cursor_x += 1;
+                }
+            }
+            crate::input::Key::Up => if cursor_y > 0 { cursor_y -= 1; cursor_x = core::cmp::min(cursor_x, lines[cursor_y].len()); },
+            crate::input::Key::Down => if cursor_y < lines.len() - 1 { cursor_y += 1; cursor_x = core::cmp::min(cursor_x, lines[cursor_y].len()); },
+            crate::input::Key::Left => if cursor_x > 0 { cursor_x -= 1; },
+            crate::input::Key::Right => if cursor_x < lines[cursor_y].len() { cursor_x += 1; },
+            _ => {}
         }
     }
 
+    // Simplified save logic for now
+    let new_content = lines.join("\n").into_bytes();
+    crate::fs::FILESYSTEM
+        .lock()
+        .as_mut()
+        .ok_or(CommandError::Failed("fs not initialized"))?
+        .write_file(path, new_content)
+        .map_err(|_| CommandError::Failed("could not save file"))?;
+
+    crate::vga_buffer::clear_screen();
     Ok(())
 }
 
-/// Returns the name of the only command that starts with `prefix`, if there is exactly one.
-pub fn complete(prefix: &str) -> Option<&'static str> {
+/// Returns the name of the only command or file that starts with `prefix`, if there is exactly one.
+pub fn complete(prefix: &str) -> Option<String> {
     if prefix.is_empty() {
         return None;
     }
-    let mut matches = COMMANDS
+
+    // Try completing commands
+    let command_matches: Vec<_> = COMMANDS
         .iter()
-        .filter(|command| command.name.starts_with(prefix));
-    let first = matches.next()?;
-    if matches.next().is_some() {
-        None
+        .filter(|command| command.name.starts_with(prefix))
+        .collect();
+
+    // Try completing files (if filesystem is initialized)
+    let file_matches = if let Ok(fs) = crate::fs::FILESYSTEM.lock().as_ref().map(|fs| fs.list("/")) {
+        fs.iter()
+            .filter(|name| name.starts_with(prefix))
+            .cloned()
+            .collect::<Vec<_>>()
     } else {
-        Some(first.name)
+        Vec::new()
+    };
+
+    let all_matches: Vec<String> = command_matches
+        .iter()
+        .map(|c| String::from(c.name))
+        .chain(file_matches.into_iter())
+        .collect();
+
+    if all_matches.len() == 1 {
+        Some(all_matches[0].clone())
+    } else {
+        None
     }
 }
 
 #[test_case]
 fn test_complete_unique_prefix() {
-    assert_eq!(complete("ec"), Some("echo"));
-    assert_eq!(complete("shut"), Some("shutdown"));
+    assert_eq!(complete("ec"), Some(String::from("echo")));
+    assert_eq!(complete("shut"), Some(String::from("shutdown")));
 }
 
 #[test_case]
