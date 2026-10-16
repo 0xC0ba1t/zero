@@ -14,6 +14,7 @@ lazy_static! {
         color_code: ColorCode::new(Color::Yellow, Color::Black),
         logical_buffer: LogicalBuffer { chars: [[ScreenChar { ascii_character: b' ', color_code: ColorCode::new(Color::Yellow, Color::Black) }; BUFFER_WIDTH]; SCROLLBACK_HEIGHT] },
         physical_buffer: unsafe { &mut *(0xb8000 as *mut PhysicalBuffer) },
+        suspended_render: false,
     });
 }
 
