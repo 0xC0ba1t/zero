@@ -112,7 +112,9 @@ impl Writer {
                     color_code: self.color_code,
                 };
                 self.column_position += 1;
-                self.render();
+                if self.row_position >= self.scroll_offset && self.row_position < self.scroll_offset + BUFFER_HEIGHT {
+                    self.render_row(self.row_position - self.scroll_offset);
+                }
             }
         }
     }
@@ -125,7 +127,7 @@ impl Writer {
             ascii_character: byte,
             color_code: self.color_code,
         };
-        self.render();
+        self.render_row(row);
     }
 
     pub fn backspace(&mut self) {
@@ -141,7 +143,9 @@ impl Writer {
             ascii_character: b' ',
             color_code: self.color_code,
         };
-        self.render();
+        if self.row_position >= self.scroll_offset && self.row_position < self.scroll_offset + BUFFER_HEIGHT {
+            self.render_row(self.row_position - self.scroll_offset);
+        }
     }
 
     fn write_string(&mut self, s: &str) {
@@ -152,6 +156,7 @@ impl Writer {
                 _ => self.write_byte(0xfe),
             }
         }
+        self.render();
         self.update_cursor();
     }
 
@@ -169,21 +174,25 @@ impl Writer {
         self.render();
     }
 
+    fn render_row(&mut self, row: usize) {
+        let logical_row = self.scroll_offset + row;
+        if logical_row < SCROLLBACK_HEIGHT {
+            for col in 0..BUFFER_WIDTH {
+                self.physical_buffer.chars[row][col].write(self.logical_buffer.chars[logical_row][col]);
+            }
+        } else {
+            for col in 0..BUFFER_WIDTH {
+                self.physical_buffer.chars[row][col].write(ScreenChar {
+                    ascii_character: b' ',
+                    color_code: self.color_code,
+                });
+            }
+        }
+    }
+
     fn render(&mut self) {
         for row in 0..BUFFER_HEIGHT {
-            let logical_row = self.scroll_offset + row;
-            if logical_row < SCROLLBACK_HEIGHT {
-                for col in 0..BUFFER_WIDTH {
-                    self.physical_buffer.chars[row][col].write(self.logical_buffer.chars[logical_row][col]);
-                }
-            } else {
-                for col in 0..BUFFER_WIDTH {
-                    self.physical_buffer.chars[row][col].write(ScreenChar {
-                        ascii_character: b' ',
-                        color_code: self.color_code,
-                    });
-                }
-            }
+            self.render_row(row);
         }
     }
 
@@ -200,7 +209,6 @@ impl Writer {
         if self.row_position >= BUFFER_HEIGHT && self.scroll_offset < self.row_position - BUFFER_HEIGHT + 1 {
             self.scroll_offset = self.row_position - BUFFER_HEIGHT + 1;
         }
-        self.render();
     }
 
     pub fn scroll_up(&mut self) {

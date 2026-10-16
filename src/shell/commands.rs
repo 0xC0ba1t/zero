@@ -484,6 +484,8 @@ fn edit(args: &[String]) -> Result<(), CommandError> {
                 crate::vga_buffer::write_at(0, i as i32, row_content);
             }
         }
+        // Force a render after updating the screen
+        crate::vga_buffer::WRITER.lock().render();
 
         // Input loop
         let key = crate::input::read_key();
