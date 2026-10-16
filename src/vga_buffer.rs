@@ -190,7 +190,7 @@ impl Writer {
         }
     }
 
-    fn render(&mut self) {
+    pub fn render(&mut self) {
         for row in 0..BUFFER_HEIGHT {
             self.render_row(row);
         }
