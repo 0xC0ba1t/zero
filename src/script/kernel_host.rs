@@ -36,6 +36,10 @@ fn key_code(key: Key) -> i32 {
         Key::Char(c) => c as i32,
         Key::Up => 256,
         Key::Down => 257,
+        Key::Left => 258,
+        Key::Right => 259,
+        Key::PageUp => 260,
+        Key::PageDown => 261,
     }
 }
 

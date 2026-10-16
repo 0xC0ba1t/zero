@@ -203,6 +203,20 @@ impl Writer {
         self.render();
     }
 
+    pub fn scroll_up(&mut self) {
+        if self.scroll_offset > 0 {
+            self.scroll_offset -= 1;
+            self.render();
+        }
+    }
+
+    pub fn scroll_down(&mut self) {
+        if self.scroll_offset < SCROLLBACK_HEIGHT - BUFFER_HEIGHT {
+            self.scroll_offset += 1;
+            self.render();
+        }
+    }
+
     fn update_cursor(&self) {
         use x86_64::instructions::port::Port;
         if self.row_position < self.scroll_offset || self.row_position >= self.scroll_offset + BUFFER_HEIGHT {

@@ -38,7 +38,7 @@ pub struct RingBuffer<const N: usize> {
 
 impl<const N: usize> RingBuffer<N> {
     /// Creates an empty queue.
-    fn new() -> Self {
+    pub const fn new() -> Self {
         RingBuffer {
             buf: [Key::Char('\0'); N],
             head: 0,

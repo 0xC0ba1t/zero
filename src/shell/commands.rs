@@ -456,7 +456,7 @@ fn edit(args: &[String]) -> Result<(), CommandError> {
         _ => return Err(CommandError::Usage),
     };
 
-    let mut content = {
+    let content = {
         let fs = crate::fs::FILESYSTEM.lock();
         let fs = fs.as_ref().ok_or(CommandError::Failed("fs not initialized"))?;
         fs.read_file(path).unwrap_or_default()
@@ -473,7 +473,7 @@ fn edit(args: &[String]) -> Result<(), CommandError> {
 
     let mut cursor_x = 0;
     let mut cursor_y = 0;
-    let mut scroll_y = 0;
+    let _scroll_y = 0;
 
     loop {
         // Redraw screen
@@ -497,7 +497,8 @@ fn edit(args: &[String]) -> Result<(), CommandError> {
                         cursor_x -= 1;
                     }
                 } else if c == '\n' {
-                    lines.insert(cursor_y + 1, lines[cursor_y].split_off(cursor_x));
+                    let split = lines[cursor_y].split_off(cursor_x);
+                    lines.insert(cursor_y + 1, split);
                     cursor_y += 1;
                     cursor_x = 0;
                 } else {
@@ -539,7 +540,7 @@ pub fn complete(prefix: &str) -> Option<String> {
         .collect();
 
     // Try completing files (if filesystem is initialized)
-    let file_matches = if let Ok(fs) = crate::fs::FILESYSTEM.lock().as_ref().map(|fs| fs.list("/")) {
+    let file_matches = if let Some(Ok(fs)) = crate::fs::FILESYSTEM.lock().as_ref().map(|fs| fs.list("/")) {
         fs.iter()
             .filter(|name| name.starts_with(prefix))
             .cloned()
