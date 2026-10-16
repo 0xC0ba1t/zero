@@ -94,9 +94,18 @@ pub struct Writer {
     color_code: ColorCode,
     logical_buffer: LogicalBuffer,
     physical_buffer: &'static mut PhysicalBuffer,
+    suspended_render: bool,
 }
 
 impl Writer {
+    pub fn suspend_render(&mut self) {
+        self.suspended_render = true;
+    }
+
+    pub fn resume_render(&mut self) {
+        self.suspended_render = false;
+        self.render();
+    }
     pub fn write_byte(&mut self, byte: u8) {
         match byte {
             b'\n' => self.new_line(),

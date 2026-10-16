@@ -108,6 +108,10 @@ extern "x86-interrupt" fn keyboard_interrupt_handler(
                 }
                 DecodedKey::RawKey(KeyCode::ArrowUp) => input::push_key(Key::Up),
                 DecodedKey::RawKey(KeyCode::ArrowDown) => input::push_key(Key::Down),
+                DecodedKey::RawKey(KeyCode::ArrowLeft) => input::push_key(Key::Left),
+                DecodedKey::RawKey(KeyCode::ArrowRight) => input::push_key(Key::Right),
+                DecodedKey::RawKey(KeyCode::PageUp) => input::push_key(Key::PageUp),
+                DecodedKey::RawKey(KeyCode::PageDown) => input::push_key(Key::PageDown),
                 DecodedKey::RawKey(_) => {}
             }
         }
