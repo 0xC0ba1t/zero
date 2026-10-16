@@ -2,6 +2,7 @@
 
 use crate::{print, println};
 use alloc::string::String;
+use alloc::vec::Vec;
 
 /// Why a command did not succeed.
 #[derive(Debug, PartialEq, Eq)]
@@ -477,18 +478,18 @@ fn edit(args: &[String]) -> Result<(), CommandError> {
         loop {
             let key = crate::input::read_key();
             match key {
-                crate::input::Key::Character(c) => {
+                crate::input::Key::Char(c) => {
                     if c == '\n' || c == '\r' {
                         println!();
                         break;
-                    }
-                    print!("{}", c);
-                    line.push(c);
-                }
-                crate::input::Key::Backspace => {
-                    if !line.is_empty() {
-                        print!("\u{8}");
-                        line.pop();
+                    } else if c == '\u{8}' {
+                        if !line.is_empty() {
+                            print!("\u{8}");
+                            line.pop();
+                        }
+                    } else {
+                        print!("{}", c);
+                        line.push(c);
                     }
                 }
                 _ => {}
