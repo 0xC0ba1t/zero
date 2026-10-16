@@ -160,6 +160,24 @@ pub static COMMANDS: &[Command] = &[
         about: "create a new directory",
         handler: mkdir,
     },
+    Command {
+        name: "pwd",
+        usage: "pwd",
+        about: "print current working directory",
+        handler: pwd,
+    },
+    Command {
+        name: "cd",
+        usage: "cd <path>",
+        about: "change current working directory",
+        handler: cd,
+    },
+    Command {
+        name: "edit",
+        usage: "edit <path>",
+        about: "edit a file (simple line editor)",
+        handler: edit,
+    },
 ];
 
 /// Looks up a command by name.
@@ -406,6 +424,95 @@ fn mkdir(args: &[String]) -> Result<(), CommandError> {
         .ok_or(CommandError::Failed("fs not initialized"))?
         .create_dir(path)
         .map_err(|_| CommandError::Failed("could not create directory"))?;
+    Ok(())
+}
+
+fn pwd(args: &[String]) -> Result<(), CommandError> {
+    expect_no_args(args)?;
+    let fs = crate::fs::FILESYSTEM.lock();
+    let fs = fs.as_ref().ok_or(CommandError::Failed("fs not initialized"))?;
+    println!("{}", fs.get_cwd());
+    Ok(())
+}
+
+fn cd(args: &[String]) -> Result<(), CommandError> {
+    let path = match args {
+        [path] => path,
+        _ => return Err(CommandError::Usage),
+    };
+    crate::fs::FILESYSTEM
+        .lock()
+        .as_mut()
+        .ok_or(CommandError::Failed("fs not initialized"))?
+        .set_cwd(path)
+        .map_err(|_| CommandError::Failed("could not change directory"))?;
+    Ok(())
+}
+
+fn edit(args: &[String]) -> Result<(), CommandError> {
+    let path = match args {
+        [path] => path,
+        _ => return Err(CommandError::Usage),
+    };
+
+    let mut content = {
+        let fs = crate::fs::FILESYSTEM.lock();
+        let fs = fs.as_ref().ok_or(CommandError::Failed("fs not initialized"))?;
+        fs.read_file(path).unwrap_or_default()
+    };
+
+    println!("editing {}: (type :wq to save and quit, :q to quit without saving)", path);
+    println!("current content:");
+    println!("{}", alloc::string::String::from_utf8_lossy(&content));
+    println!("---");
+
+    let mut lines: Vec<String> = alloc::string::String::from_utf8_lossy(&content)
+        .lines()
+        .map(String::from)
+        .collect();
+
+    loop {
+        print!("> ");
+        let mut line = String::new();
+        loop {
+            let key = crate::input::read_key();
+            match key {
+                crate::input::Key::Character(c) => {
+                    if c == '\n' || c == '\r' {
+                        println!();
+                        break;
+                    }
+                    print!("{}", c);
+                    line.push(c);
+                }
+                crate::input::Key::Backspace => {
+                    if !line.is_empty() {
+                        print!("\u{8}");
+                        line.pop();
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        if line == ":wq" {
+            let new_content = lines.join("\n").into_bytes();
+            crate::fs::FILESYSTEM
+                .lock()
+                .as_mut()
+                .ok_or(CommandError::Failed("fs not initialized"))?
+                .write_file(path, new_content)
+                .map_err(|_| CommandError::Failed("could not save file"))?;
+            println!("saved.");
+            break;
+        } else if line == ":q" {
+            println!("quit.");
+            break;
+        } else {
+            lines.push(line);
+        }
+    }
+
     Ok(())
 }
 

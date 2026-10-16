@@ -11,6 +11,7 @@ pub enum Node {
 
 pub struct Filesystem {
     root: Node,
+    cwd: String,
 }
 
 #[derive(Debug)]
@@ -19,17 +20,45 @@ pub enum FsError {
     AlreadyExists,
     NotADirectory,
     IsADirectory,
+    InvalidPath,
 }
 
 impl Filesystem {
     pub fn new() -> Self {
         Self {
             root: Node::Directory(BTreeMap::new()),
+            cwd: String::from("/"),
         }
     }
 
+    fn resolve_path(&self, path: &str) -> String {
+        if path.starts_with('/') {
+            String::from(path)
+        } else {
+            let mut resolved = self.cwd.clone();
+            if !resolved.ends_with('/') {
+                resolved.push('/');
+            }
+            resolved.push_str(path);
+            resolved
+        }
+    }
+
+    pub fn get_cwd(&self) -> String {
+        self.cwd.clone()
+    }
+
+    pub fn set_cwd(&mut self, path: &str) -> Result<(), FsError> {
+        let resolved = self.resolve_path(path);
+        // Simple validation: check if directory exists
+        let _ = self.list(&resolved)?;
+        self.cwd = resolved;
+        Ok(())
+    }
+
     pub fn create_file(&mut self, path: &str) -> Result<(), FsError> {
-        let parts: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+        let resolved_path = self.resolve_path(path);
+        let parts: Vec<&str> = resolved_path.split('/').filter(|s| !s.is_empty()).collect();
         let mut current = &mut self.root;
 
         for (i, part) in parts.iter().enumerate() {
@@ -50,7 +79,8 @@ impl Filesystem {
     }
 
     pub fn create_dir(&mut self, path: &str) -> Result<(), FsError> {
-        let parts: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+        let resolved_path = self.resolve_path(path);
+        let parts: Vec<&str> = resolved_path.split('/').filter(|s| !s.is_empty()).collect();
         let mut current = &mut self.root;
 
         for (i, part) in parts.iter().enumerate() {
@@ -71,7 +101,8 @@ impl Filesystem {
     }
 
     pub fn read_file(&self, path: &str) -> Result<Vec<u8>, FsError> {
-        let parts: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+        let resolved_path = self.resolve_path(path);
+        let parts: Vec<&str> = resolved_path.split('/').filter(|s| !s.is_empty()).collect();
         let mut current = &self.root;
 
         for part in parts {
@@ -90,7 +121,8 @@ impl Filesystem {
     }
 
     pub fn write_file(&mut self, path: &str, data: Vec<u8>) -> Result<(), FsError> {
-        let parts: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+        let resolved_path = self.resolve_path(path);
+        let parts: Vec<&str> = resolved_path.split('/').filter(|s| !s.is_empty()).collect();
         let mut current = &mut self.root;
 
         for part in parts {
@@ -110,7 +142,8 @@ impl Filesystem {
     }
 
     pub fn delete(&mut self, path: &str) -> Result<(), FsError> {
-        let parts: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+        let resolved_path = self.resolve_path(path);
+        let parts: Vec<&str> = resolved_path.split('/').filter(|s| !s.is_empty()).collect();
         let mut current = &mut self.root;
 
         for (i, part) in parts.iter().enumerate() {
@@ -128,7 +161,8 @@ impl Filesystem {
     }
 
     pub fn list(&self, path: &str) -> Result<Vec<String>, FsError> {
-        let parts: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+        let resolved_path = self.resolve_path(path);
+        let parts: Vec<&str> = resolved_path.split('/').filter(|s| !s.is_empty()).collect();
         let mut current = &self.root;
 
         for part in parts {
