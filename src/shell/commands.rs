@@ -344,9 +344,9 @@ fn ls(args: &[String]) -> Result<(), CommandError> {
         [path] => path,
         _ => return Err(CommandError::Usage),
     };
-    let list = crate::fs::FILESYSTEM
-        .lock()
-        .list(path)
+    let fs = crate::fs::FILESYSTEM.lock();
+    let fs = fs.as_ref().ok_or(CommandError::Failed("fs not initialized"))?;
+    let list = fs.list(path)
         .map_err(|_| CommandError::Failed("no such directory"))?;
     for item in list {
         println!("{}", item);
@@ -359,9 +359,9 @@ fn cat(args: &[String]) -> Result<(), CommandError> {
         [path] => path,
         _ => return Err(CommandError::Usage),
     };
-    let data = crate::fs::FILESYSTEM
-        .lock()
-        .read_file(path)
+    let fs = crate::fs::FILESYSTEM.lock();
+    let fs = fs.as_ref().ok_or(CommandError::Failed("fs not initialized"))?;
+    let data = fs.read_file(path)
         .map_err(|_| CommandError::Failed("no such file"))?;
     println!("{}", alloc::string::String::from_utf8_lossy(&data));
     Ok(())
@@ -374,6 +374,8 @@ fn touch(args: &[String]) -> Result<(), CommandError> {
     };
     crate::fs::FILESYSTEM
         .lock()
+        .as_mut()
+        .ok_or(CommandError::Failed("fs not initialized"))?
         .create_file(path)
         .map_err(|_| CommandError::Failed("could not create file"))?;
     Ok(())
@@ -386,6 +388,8 @@ fn rm(args: &[String]) -> Result<(), CommandError> {
     };
     crate::fs::FILESYSTEM
         .lock()
+        .as_mut()
+        .ok_or(CommandError::Failed("fs not initialized"))?
         .delete(path)
         .map_err(|_| CommandError::Failed("could not remove file/directory"))?;
     Ok(())
@@ -398,6 +402,8 @@ fn mkdir(args: &[String]) -> Result<(), CommandError> {
     };
     crate::fs::FILESYSTEM
         .lock()
+        .as_mut()
+        .ok_or(CommandError::Failed("fs not initialized"))?
         .create_dir(path)
         .map_err(|_| CommandError::Failed("could not create directory"))?;
     Ok(())

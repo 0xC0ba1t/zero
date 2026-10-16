@@ -147,4 +147,4 @@ impl Filesystem {
     }
 }
 
-pub static FILESYSTEM: Mutex<Filesystem> = Mutex::new(Filesystem::new());
+pub static FILESYSTEM: Mutex<Option<Filesystem>> = Mutex::new(None);

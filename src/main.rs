@@ -25,6 +25,7 @@ fn kernal_main(boot_info: &'static BootInfo) -> ! {
     let mut frame_allocator = unsafe { BootInfoFrameAllocator::init(&boot_info.memory_map) };
 
     allocator::init_heap(&mut mapper, &mut frame_allocator).expect("heap initialization failed");
+    *zero::fs::FILESYSTEM.lock() = Some(zero::fs::Filesystem::new());
 
     #[cfg(test)]
     test_main();
