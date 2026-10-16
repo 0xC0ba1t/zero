@@ -47,16 +47,37 @@ fn boot_screen() {
     vga_buffer::write_at(0, 0, &welcome);
     vga_buffer::write_at(0, 1, "--------------------------------------------------------------------------------");
 
+    // Border lines
+    vga_buffer::write_at(0, 2, "--------------------------------------------------------------------------------");
+    vga_buffer::write_at(0, 23, "--------------------------------------------------------------------------------");
+
+    // Stars
+    vga_buffer::set_color(Color::White, Color::Black);
+    vga_buffer::put_at(5, 5, b'*');
+    vga_buffer::put_at(40, 4, b'*');
+    vga_buffer::put_at(70, 20, b'*');
+    vga_buffer::put_at(30, 18, b'*');
+
+    // Clouds (using block characters)
+    vga_buffer::set_color(Color::DarkGray, Color::Black);
+    // Cloud 1
+    for x in 10..25 { vga_buffer::put_at(x, 6, 219); }
+    for x in 12..22 { vga_buffer::put_at(x, 5, 219); }
+    // Cloud 2
+    for x in 50..65 { vga_buffer::put_at(x, 15, 219); }
+    for x in 52..62 { vga_buffer::put_at(x, 14, 219); }
+
     // Moon
     vga_buffer::set_color(Color::White, Color::Black);
-    vga_buffer::write_at(64, 5, "  ___  ");
-    vga_buffer::write_at(63, 6, " /   \\ ");
-    vga_buffer::write_at(63, 7, " \\___/ ");
+    for y in 4..9 {
+        vga_buffer::put_at(65, y, 219);
+        vga_buffer::put_at(66, y, 219);
+    }
+    vga_buffer::put_at(67, 5, 219); vga_buffer::put_at(67, 7, 219);
 
     // Footer
     vga_buffer::set_color(Color::White, Color::Black);
-    vga_buffer::write_at(0, 24, "--------------------------------------------------------------------------------");
-    vga_buffer::write_at(25, 23, "Press any key to enter the shell");
+    vga_buffer::write_at(25, 24, "Press any key to enter");
 
     loop {
         match zero::input::read_key() {
