@@ -3,6 +3,10 @@ name = "zero"
 version = "0.3.0"
 edition = "2021"
 
+[[bin]]
+name = "zero"
+path = "src/main.rs"
+
 [[test]]
 name = "should_panic"
 harness = false
