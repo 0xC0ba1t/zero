@@ -18,9 +18,23 @@ fn main() {
         .create_uefi_image(&uefi_path)
         .expect("Failed to create UEFI disk image");
 
-    // Pass disk image paths as env variables
+    // Pass disk image paths as env variables to the main crate
     println!("cargo:rustc-env=UEFI_PATH={}", uefi_path.display());
     println!("cargo:rustc-env=BIOS_PATH={}", bios_path.display());
+
+    // Also copy disk images to a known location for easy access
+    let target_dir = PathBuf::from(std::env::var("CARGO_TARGET_DIR").unwrap_or_else(|_| {
+        PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap()).join("target")
+    }));
+    let profile = std::env::var("PROFILE").unwrap_or_else(|_| "debug".to_string());
+    let release_dir = if profile == "release" { "release" } else { "debug" };
+
+    let dest_bios = target_dir.join("x86_64-unknown-none").join(release_dir).join("bios.img");
+    let dest_uefi = target_dir.join("x86_64-unknown-none").join(release_dir).join("uefi.img");
+
+    std::fs::create_dir_all(dest_bios.parent().unwrap()).ok();
+    std::fs::copy(&bios_path, &dest_bios).ok();
+    std::fs::copy(&uefi_path, &dest_uefi).ok();
 
     println!("cargo:rerun-if-changed=kernel/src/");
     println!("cargo:rerun-if-changed=kernel/Cargo.toml");
