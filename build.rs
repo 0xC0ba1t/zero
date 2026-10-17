@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 fn main() {
     // Get the kernel binary path (set by cargo's artifact dependency feature)
-    let kernel = PathBuf::from(std::env::var_os("CARGO_BIN_FILE_KERNEL_zero").unwrap());
+    let kernel = PathBuf::from(std::env::var_os("CARGO_BIN_FILE_ZERO_zero").unwrap());
 
     let out_dir = PathBuf::from(std::env::var_os("OUT_DIR").unwrap());
 

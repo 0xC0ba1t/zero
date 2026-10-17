@@ -7,10 +7,16 @@ edition = "2021"
 bootloader = "0.11"
 
 [dependencies]
-kernel = { path = "kernel", artifact = "bin", target = "x86_64-unknown-none" }
+zero = { path = "kernel", artifact = "bin", target = "x86_64-unknown-none" }
 
 [lib]
 path = "src/lib.rs"
 
 [workspace]
 members = ["kernel"]
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
