@@ -23,27 +23,19 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     use zero::memory::{self, BootInfoFrameAllocator};
     use zero::allocator;
     use x86_64::VirtAddr;
-    use zero::serial_println;
-
-    serial_println!("Kernel entry point reached");
 
     zero::init(); // init idt <Interrupt Descriptor Table>
-    serial_println!("IDT initialized");
 
     let phys_mem_offset = VirtAddr::new(boot_info.physical_memory_offset.into_option().unwrap_or(0));
-    serial_println!("Phys mem offset: {:?}", phys_mem_offset);
     let mut mapper = unsafe { memory::init(phys_mem_offset) };
-    serial_println!("Mapper initialized");
     let mut frame_allocator = unsafe { BootInfoFrameAllocator::init(&boot_info.memory_regions) };
-    serial_println!("Frame allocator initialized");
 
     allocator::init_heap(&mut mapper, &mut frame_allocator).expect("heap initialization failed");
-    serial_println!("Heap initialized");
 
     // Map the VGA text buffer at 0xb8000 so we can write to it
     {
-        use x86_64::structures::paging::{Page, PhysFrame, PageTableFlags as Flags, Mapper, Size4KiB};
-        let vga_page: Page<Size4KiB> = Page::containing_address(x86_64::VirtAddr::new(0xb8000));
+        use x86_64::structures::paging::{Page, PhysFrame, PageTableFlags as Flags};
+        let vga_page = Page::containing_address(x86_64::VirtAddr::new(0xb8000));
         let vga_frame = PhysFrame::containing_address(x86_64::PhysAddr::new(0xb8000));
         let flags = Flags::PRESENT | Flags::WRITABLE | Flags::NO_CACHE;
         unsafe {
@@ -147,8 +139,7 @@ fn boot_screen() {
 #[cfg(not(test))]
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
-    use zero::serial_println;
-    serial_println!("{}", info);
+    println!("{}", info);
     zero::hlt_loop();
 }
 
