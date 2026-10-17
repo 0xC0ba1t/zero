@@ -36,7 +36,7 @@ fn kernal_main(boot_info: &'static mut BootInfo) -> ! {
     if let Some(fb) = boot_info.framebuffer.as_mut() {
         let info = fb.info();
         let frame_buffer = unsafe { fb.buffer_mut() };
-        *crate::graphics::framebuffer::FRAMEBUFFER.lock() = Some(crate::graphics::framebuffer::Framebuffer::new(info, frame_buffer));
+        *zero::graphics::framebuffer::FRAMEBUFFER.lock() = Some(zero::graphics::framebuffer::Framebuffer::new(info, frame_buffer));
     }
 
     *zero::fs::FILESYSTEM.lock() = Some(zero::fs::Filesystem::new());
