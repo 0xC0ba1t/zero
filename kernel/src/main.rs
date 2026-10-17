@@ -23,6 +23,9 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     use zero::memory::{self, BootInfoFrameAllocator};
     use zero::allocator;
     use x86_64::VirtAddr;
+    use zero::serial_println;
+
+    serial_println!("Kernel entry point reached");
 
     zero::init(); // init idt <Interrupt Descriptor Table>
 
@@ -139,7 +142,8 @@ fn boot_screen() {
 #[cfg(not(test))]
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
-    println!("{}", info);
+    use zero::serial_println;
+    serial_println!("{}", info);
     zero::hlt_loop();
 }
 
