@@ -28,12 +28,17 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     serial_println!("Kernel entry point reached");
 
     zero::init(); // init idt <Interrupt Descriptor Table>
+    serial_println!("IDT initialized");
 
     let phys_mem_offset = VirtAddr::new(boot_info.physical_memory_offset.into_option().unwrap_or(0));
+    serial_println!("Phys mem offset: {:?}", phys_mem_offset);
     let mut mapper = unsafe { memory::init(phys_mem_offset) };
+    serial_println!("Mapper initialized");
     let mut frame_allocator = unsafe { BootInfoFrameAllocator::init(&boot_info.memory_regions) };
+    serial_println!("Frame allocator initialized");
 
     allocator::init_heap(&mut mapper, &mut frame_allocator).expect("heap initialization failed");
+    serial_println!("Heap initialized");
 
     // Map the VGA text buffer at 0xb8000 so we can write to it
     {
