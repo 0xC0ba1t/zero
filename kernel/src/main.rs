@@ -16,9 +16,9 @@ pub static BOOTLOADER_CONFIG: BootloaderConfig = {
     config
 };
 
-entry_point!(kernal_main, config = &BOOTLOADER_CONFIG);
+entry_point!(kernel_main, config = &BOOTLOADER_CONFIG);
 
-fn kernal_main(boot_info: &'static mut BootInfo) -> ! {
+fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
 
     use zero::memory::{self, BootInfoFrameAllocator};
     use zero::allocator;
@@ -26,11 +26,25 @@ fn kernal_main(boot_info: &'static mut BootInfo) -> ! {
 
     zero::init(); // init idt <Interrupt Descriptor Table>
 
-    let phys_mem_offset = VirtAddr::new(boot_info.physical_memory_offset.as_ref().copied().unwrap_or(0));
+    let phys_mem_offset = VirtAddr::new(boot_info.physical_memory_offset.into_option().unwrap_or(0));
     let mut mapper = unsafe { memory::init(phys_mem_offset) };
     let mut frame_allocator = unsafe { BootInfoFrameAllocator::init(&boot_info.memory_regions) };
 
     allocator::init_heap(&mut mapper, &mut frame_allocator).expect("heap initialization failed");
+
+    // Map the VGA text buffer at 0xb8000 so we can write to it
+    {
+        use x86_64::structures::paging::{Page, PhysFrame, PageTableFlags as Flags};
+        let vga_page = Page::containing_address(x86_64::VirtAddr::new(0xb8000));
+        let vga_frame = PhysFrame::containing_address(x86_64::PhysAddr::new(0xb8000));
+        let flags = Flags::PRESENT | Flags::WRITABLE | Flags::NO_CACHE;
+        unsafe {
+            mapper
+                .map_to(vga_page, vga_frame, flags, &mut frame_allocator)
+                .expect("failed to map VGA buffer")
+                .flush();
+        }
+    }
 
     // Initialize framebuffer if available
     if let Some(fb) = boot_info.framebuffer.as_mut() {

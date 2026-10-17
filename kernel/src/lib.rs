@@ -112,19 +112,19 @@ pub static BOOTLOADER_CONFIG: BootloaderConfig = {
 };
 
 #[cfg(test)]
-entry_point!(test_kernal_main, config = &BOOTLOADER_CONFIG);
+entry_point!(test_kernel_main, config = &BOOTLOADER_CONFIG);
 
 /// Entry point for `cargo xtest`
 #[cfg(test)]
 #[no_mangle]
-fn test_kernal_main(boot_info: &'static mut BootInfo) -> ! {
+fn test_kernel_main(boot_info: &'static mut BootInfo) -> ! {
     use crate::memory::BootInfoFrameAllocator;
     use x86_64::VirtAddr;
 
     init();
 
     // many tests allocate (shell parser, line editor, history), so they need a heap
-    let phys_mem_offset = VirtAddr::new(boot_info.physical_memory_offset.as_ref().copied().unwrap_or(0));
+    let phys_mem_offset = VirtAddr::new(boot_info.physical_memory_offset.into_option().unwrap_or(0));
     let mut mapper = unsafe { memory::init(phys_mem_offset) };
     let mut frame_allocator = unsafe { BootInfoFrameAllocator::init(&boot_info.memory_regions) };
     allocator::init_heap(&mut mapper, &mut frame_allocator).expect("heap initialization failed");
