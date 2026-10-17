@@ -34,8 +34,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
 
     // Map the VGA text buffer at 0xb8000 so we can write to it
     {
-        use x86_64::structures::paging::{Page, PhysFrame, PageTableFlags as Flags};
-        let vga_page = Page::containing_address(x86_64::VirtAddr::new(0xb8000));
+        use x86_64::structures::paging::{Page, PhysFrame, PageTableFlags as Flags, Mapper, Size4KiB};
+        let vga_page: Page<Size4KiB> = Page::containing_address(x86_64::VirtAddr::new(0xb8000));
         let vga_frame = PhysFrame::containing_address(x86_64::PhysAddr::new(0xb8000));
         let flags = Flags::PRESENT | Flags::WRITABLE | Flags::NO_CACHE;
         unsafe {
