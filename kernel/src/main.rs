@@ -8,6 +8,7 @@ extern crate alloc;
 
 use bootloader_api::{BootInfo, entry_point, config::{BootloaderConfig, Mapping}};
 use zero::println;
+use zero::serial_println;
 use core::panic::PanicInfo;
 
 pub static BOOTLOADER_CONFIG: BootloaderConfig = {
@@ -24,13 +25,23 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     use zero::allocator;
     use x86_64::VirtAddr;
 
-    zero::init(); // init idt <Interrupt Descriptor Table>
+    serial_println!("[kernel] kernel_main reached");
 
-    let phys_mem_offset = VirtAddr::new(boot_info.physical_memory_offset.into_option().unwrap_or(0));
+    zero::init(); // init idt <Interrupt Descriptor Table>
+    serial_println!("[kernel] idt initialized");
+
+    let phys_mem_offset_val = boot_info.physical_memory_offset.into_option().unwrap_or(0);
+    serial_println!("[kernel] phys_mem_offset = 0x{:x}", phys_mem_offset_val);
+
+    let phys_mem_offset = VirtAddr::new(phys_mem_offset_val);
     let mut mapper = unsafe { memory::init(phys_mem_offset) };
+    serial_println!("[kernel] mapper initialized");
+
     let mut frame_allocator = unsafe { BootInfoFrameAllocator::init(&boot_info.memory_regions) };
+    serial_println!("[kernel] frame allocator initialized");
 
     allocator::init_heap(&mut mapper, &mut frame_allocator).expect("heap initialization failed");
+    serial_println!("[kernel] heap initialized");
 
     // Map the VGA text buffer at 0xb8000 so we can write to it
     {
@@ -45,6 +56,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                 .flush();
         }
     }
+    serial_println!("[kernel] VGA buffer mapped");
 
     // Initialize framebuffer if available
     if let Some(fb) = boot_info.framebuffer.as_mut() {
@@ -52,20 +64,25 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         let frame_buffer = unsafe { fb.buffer_mut() };
         *zero::graphics::framebuffer::FRAMEBUFFER.lock() = Some(zero::graphics::framebuffer::Framebuffer::new(info, frame_buffer));
     }
+    serial_println!("[kernel] framebuffer checked");
 
     *zero::fs::FILESYSTEM.lock() = Some(zero::fs::Filesystem::new());
+    serial_println!("[kernel] filesystem initialized");
 
     boot_screen();
+    serial_println!("[kernel] boot_screen done");
 
     #[cfg(test)]
     test_main();
 
+    serial_println!("[kernel] starting shell");
     zero::shell::run();
 }
 
 fn boot_screen() {
     use zero::vga_buffer::{self, Color};
     use alloc::format;
+    serial_println!("[kernel] boot_screen starting");
     vga_buffer::clear_screen();
 
     // Welcome message
@@ -139,7 +156,9 @@ fn boot_screen() {
 #[cfg(not(test))]
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
-    println!("{}", info);
+    serial_println!("[kernel] PANIC: {}", info);
+    // Try VGA too, in case it's set up
+    println!("PANIC: {}", info);
     zero::hlt_loop();
 }
 
