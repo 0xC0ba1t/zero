@@ -101,7 +101,7 @@ impl BootInfoFrameAllocator {
             .filter(|r| r.kind == MemoryRegionKind::Usable);
         // map each region to its address range (as u64 for stepping)
         let addr_ranges = usable_regions
-            .map(|r| r.start.as_u64()..r.end.as_u64());
+            .map(|r| r.start..r.end);
         // transform to an iterator of frame start addresses
         let frame_addresses = addr_ranges.flat_map(|r| r.step_by(4096));
         // create `PhysFrame` types from the start addresses
