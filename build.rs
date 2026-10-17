@@ -24,7 +24,7 @@ fn main() {
 
     // Also copy disk images to a known location for easy access
     let target_dir = PathBuf::from(std::env::var("CARGO_TARGET_DIR").unwrap_or_else(|_| {
-        PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap()).join("target")
+        std::env::var("CARGO_MANIFEST_DIR").unwrap() + "/target"
     }));
     let profile = std::env::var("PROFILE").unwrap_or_else(|_| "debug".to_string());
     let release_dir = if profile == "release" { "release" } else { "debug" };
