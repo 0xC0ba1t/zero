@@ -179,7 +179,24 @@ pub static COMMANDS: &[Command] = &[
         about: "edit a file (simple line editor)",
         handler: edit,
     },
+    Command {
+        name: "cube",
+        usage: "cube",
+        about: "show a spinning 3D cube",
+        handler: cube_demo,
+    },
 ];
+
+fn cube_demo(args: &[String]) -> Result<(), CommandError> {
+    expect_no_args(args)?;
+    let mut fb = crate::graphics::framebuffer::FRAMEBUFFER.lock();
+    if let Some(ref mut display) = *fb {
+        crate::graphics::demo::run_demo(display);
+        Ok(())
+    } else {
+        Err(CommandError::Failed("graphics not initialized"))
+    }
+}
 
 /// Looks up a command by name.
 pub fn find(name: &str) -> Option<&'static Command> {

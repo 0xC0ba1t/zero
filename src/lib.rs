@@ -25,6 +25,7 @@ pub mod power;
 pub mod shell;
 pub mod script;
 pub mod fs;
+pub mod graphics;
 
 pub trait Testable {
     fn run(&self) -> ();
