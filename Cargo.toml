@@ -8,7 +8,7 @@ version = "0.1.0"
 edition = "2021"
 
 [build-dependencies]
-zero = { path = "kernel", artifact = "bin", target = "x86_64-zero" }
+zero = { path = "kernel", artifact = "bin", target = "x86_64-zero.json" }
 bootloader = "0.11"
 
 [lib]
