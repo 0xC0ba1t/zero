@@ -1,3 +1,4 @@
+use alloc::vec::Vec;
 use crate::graphics::display::Display;
 use crate::graphics::math::{Mat4, Vec3};
 use crate::graphics::rasterizer::Rasterizer;
@@ -39,7 +40,7 @@ impl Cube {
 
         let transform = projection_matrix * Mat4::from_translation(self.position) * rotation_matrix;
 
-        let mut projected_vertices = Vec::with_capacity(vertices.len());
+        let mut projected_vertices: Vec<_> = Vec::with_capacity(vertices.len());
         for v in vertices {
             let p = transform.project_point3(v);
             // Map from [-1, 1] to screen coordinates
