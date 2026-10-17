@@ -1,5 +1,5 @@
 use crate::graphics::display::Display;
-use bootloader::FrameBufferInfo; // fix
+use bootloader_api::info::FrameBufferInfo;
 use spin::Mutex;
 
 pub static FRAMEBUFFER: Mutex<Option<Framebuffer>> = Mutex::new(None);

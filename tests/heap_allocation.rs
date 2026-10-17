@@ -8,20 +8,26 @@ extern crate alloc;
 
 use alloc::{boxed::Box, vec::Vec};
 use zero::allocator::HEAP_SIZE;
-use bootloader::{entry_point, BootInfo};
+use bootloader_api::{entry_point, BootInfo, config::{BootloaderConfig, Mapping}};
 use core::panic::PanicInfo;
 
-entry_point!(main);
+pub static BOOTLOADER_CONFIG: BootloaderConfig = {
+    let mut config = BootloaderConfig::new_default();
+    config.mappings.physical_memory = Some(Mapping::Dynamic);
+    config
+};
 
-fn main(boot_info: &'static BootInfo) -> ! {
+entry_point!(main, config = &BOOTLOADER_CONFIG);
+
+fn main(boot_info: &'static mut BootInfo) -> ! {
     use zero::allocator;
     use zero::memory::{self, BootInfoFrameAllocator};
     use x86_64::VirtAddr;
 
     zero::init();
-    let phys_mem_offset = VirtAddr::new(boot_info.physical_memory_offset);
+    let phys_mem_offset = VirtAddr::new(boot_info.physical_memory_offset.as_ref().copied().unwrap_or(0));
     let mut mapper = unsafe { memory::init(phys_mem_offset) };
-    let mut frame_allocator = unsafe { BootInfoFrameAllocator::init(&boot_info.memory_map) };
+    let mut frame_allocator = unsafe { BootInfoFrameAllocator::init(&boot_info.memory_regions) };
     allocator::init_heap(&mut mapper, &mut frame_allocator).expect("heap initialization failed");
 
     test_main();

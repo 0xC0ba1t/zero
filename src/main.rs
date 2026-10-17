@@ -6,13 +6,19 @@
 
 extern crate alloc;
 
-use bootloader::{BootInfo, entry_point};
+use bootloader_api::{BootInfo, entry_point, config::{BootloaderConfig, Mapping}};
 use zero::println;
 use core::panic::PanicInfo;
 
-entry_point!(kernal_main);
+pub static BOOTLOADER_CONFIG: BootloaderConfig = {
+    let mut config = BootloaderConfig::new_default();
+    config.mappings.physical_memory = Some(Mapping::Dynamic);
+    config
+};
 
-fn kernal_main(boot_info: &'static BootInfo) -> ! {
+entry_point!(kernal_main, config = &BOOTLOADER_CONFIG);
+
+fn kernal_main(boot_info: &'static mut BootInfo) -> ! {
 
     use zero::memory::{self, BootInfoFrameAllocator};
     use zero::allocator;
@@ -20,21 +26,17 @@ fn kernal_main(boot_info: &'static BootInfo) -> ! {
 
     zero::init(); // init idt <Interrupt Descriptor Table>
 
-    let phys_mem_offset = VirtAddr::new(boot_info.physical_memory_offset);
+    let phys_mem_offset = VirtAddr::new(boot_info.physical_memory_offset.as_ref().copied().unwrap_or(0));
     let mut mapper = unsafe { memory::init(phys_mem_offset) };
-    let mut frame_allocator = unsafe { BootInfoFrameAllocator::init(&boot_info.memory_map) };
+    let mut frame_allocator = unsafe { BootInfoFrameAllocator::init(&boot_info.memory_regions) };
 
     allocator::init_heap(&mut mapper, &mut frame_allocator).expect("heap initialization failed");
 
     // Initialize framebuffer if available
-    if let Some(fb_info) = boot_info.framebuffer.as_ref() {
-        let frame_buffer = unsafe {
-            core::slice::from_raw_parts_mut(
-                fb_info.buffer.as_ptr() as *mut u8,
-                fb_info.byte_len,
-            )
-        };
-        *crate::graphics::framebuffer::FRAMEBUFFER.lock() = Some(crate::graphics::framebuffer::Framebuffer::new(fb_info.info, frame_buffer));
+    if let Some(fb) = boot_info.framebuffer.as_mut() {
+        let info = fb.info();
+        let frame_buffer = unsafe { fb.buffer_mut() };
+        *crate::graphics::framebuffer::FRAMEBUFFER.lock() = Some(crate::graphics::framebuffer::Framebuffer::new(info, frame_buffer));
     }
 
     *zero::fs::FILESYSTEM.lock() = Some(zero::fs::Filesystem::new());

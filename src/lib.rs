@@ -7,7 +7,7 @@
 
 use core::panic::PanicInfo;
 #[cfg(test)]
-use bootloader::{BootInfo, entry_point};
+use bootloader_api::{BootInfo, entry_point, config::{BootloaderConfig, Mapping}};
 
 use interrupts::PIC_1_OFFSET;
 
@@ -105,21 +105,28 @@ impl InterruptIndex {
 }
 
 #[cfg(test)]
-entry_point!(test_kernal_main);
+pub static BOOTLOADER_CONFIG: BootloaderConfig = {
+    let mut config = BootloaderConfig::new_default();
+    config.mappings.physical_memory = Some(Mapping::Dynamic);
+    config
+};
+
+#[cfg(test)]
+entry_point!(test_kernal_main, config = &BOOTLOADER_CONFIG);
 
 /// Entry point for `cargo xtest`
 #[cfg(test)]
 #[no_mangle]
-fn test_kernal_main(boot_info: &'static BootInfo) -> ! {
+fn test_kernal_main(boot_info: &'static mut BootInfo) -> ! {
     use crate::memory::BootInfoFrameAllocator;
     use x86_64::VirtAddr;
 
     init();
 
     // many tests allocate (shell parser, line editor, history), so they need a heap
-    let phys_mem_offset = VirtAddr::new(boot_info.physical_memory_offset);
+    let phys_mem_offset = VirtAddr::new(boot_info.physical_memory_offset.as_ref().copied().unwrap_or(0));
     let mut mapper = unsafe { memory::init(phys_mem_offset) };
-    let mut frame_allocator = unsafe { BootInfoFrameAllocator::init(&boot_info.memory_map) };
+    let mut frame_allocator = unsafe { BootInfoFrameAllocator::init(&boot_info.memory_regions) };
     allocator::init_heap(&mut mapper, &mut frame_allocator).expect("heap initialization failed");
 
     test_main();

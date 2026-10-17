@@ -18,6 +18,8 @@ impl Cube {
     }
 
     pub fn render(&self, display: &mut dyn Display) {
+        let width = display.width();
+        let height = display.height();
         let mut rasterizer = Rasterizer::new(display);
 
         // Define cube vertices
@@ -45,8 +47,8 @@ impl Cube {
         for v in vertices {
             let p = transform.project_point3(v);
             // Map from [-1, 1] to screen coordinates
-            let x = ((p.x + 1.0) * 0.5 * display.width() as f32) as i32;
-            let y = ((1.0 - p.y) * 0.5 * display.height() as f32) as i32;
+            let x = ((p.x + 1.0) * 0.5 * width as f32) as i32;
+            let y = ((1.0 - p.y) * 0.5 * height as f32) as i32;
             projected_vertices.push((x, y));
         }
 
