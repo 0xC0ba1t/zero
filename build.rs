@@ -29,8 +29,8 @@ fn main() {
     let profile = std::env::var("PROFILE").unwrap_or_else(|_| "debug".to_string());
     let release_dir = if profile == "release" { "release" } else { "debug" };
 
-    let dest_bios = target_dir.join("x86_64-unknown-none").join(release_dir).join("bios.img");
-    let dest_uefi = target_dir.join("x86_64-unknown-none").join(release_dir).join("uefi.img");
+    let dest_bios = target_dir.join("x86_64-zero").join(release_dir).join("bios.img");
+    let dest_uefi = target_dir.join("x86_64-zero").join(release_dir).join("uefi.img");
 
     std::fs::create_dir_all(dest_bios.parent().unwrap()).ok();
     std::fs::copy(&bios_path, &dest_bios).ok();

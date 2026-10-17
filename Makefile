@@ -3,11 +3,11 @@ build:
 
 run:
 	cargo build
-	qemu-system-x86_64 -drive format=raw,file=target/x86_64-unknown-none/debug/bios.img
+	qemu-system-x86_64 -drive format=raw,file=target/x86_64-zero/debug/bios.img
 
 run-release:
 	cargo build --release
-	qemu-system-x86_64 -drive format=raw,file=target/x86_64-unknown-none/release/bios.img
+	qemu-system-x86_64 -drive format=raw,file=target/x86_64-zero/release/bios.img
 
 build-release:
 	cargo build --release
