@@ -1,6 +1,7 @@
 [unstable]
 bindeps = true
 json-target-spec = true
+unstable-options = true
 build-std = ["core", "compiler_builtins", "alloc"]
 build-std-features = ["compiler-builtins-mem"]
 panic-abort-tests = true

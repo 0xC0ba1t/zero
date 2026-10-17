@@ -1,7 +1,10 @@
 [unstable]
+bindeps = true
 build-std = ["core", "compiler_builtins", "alloc"]
 build-std-features = ["compiler-builtins-mem"]
+json-target-spec = true
 panic-abort-tests = true
+unstable-options = true
 
 [build]
 target = "x86_64-zero.json"
