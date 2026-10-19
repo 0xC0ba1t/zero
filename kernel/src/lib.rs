@@ -84,7 +84,7 @@ pub fn init() {
     serial_println!("[kernel] loading GDT");
     gdt::init();
     serial_println!("[kernel] GDT loaded");
-    serial_println("[kernel] loading IDT");
+    serial_println!("[kernel] loading IDT");
     interrupts::init_idt();
     serial_println!("[kernel] IDT loaded");
     serial_println!("[kernel] initializing PIC");
@@ -93,7 +93,7 @@ pub fn init() {
     serial_println!("[kernel] initializing PIT");
     time::init_pit();
     serial_println!("[kernel] PIT initialized");
-    serial_println("[kernel] enabling interrupts");
+    serial_println!("[kernel] enabling interrupts");
     x86_64::instructions::interrupts::enable();
     serial_println!("[kernel] interrupts enabled");
 }
