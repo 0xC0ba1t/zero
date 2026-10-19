@@ -16,11 +16,25 @@ pub const PIC_2_OFFSET: u8 = PIC_1_OFFSET + 8;
 pub static PICS: spin::Mutex<ChainedPics> =
     spin::Mutex::new(unsafe { ChainedPics::new(PIC_1_OFFSET, PIC_2_OFFSET) });
 
+/// Handler for spurious / unhandled interrupts (e.g. NMI on vector 2).
+/// Logs and halts so we can see what fired.
+extern "x86-interrupt" fn spurious_handler(_stack_frame: InterruptStackFrame) {
+    serial_println!("[kernel] spurious/unhandled interrupt fired");
+    crate::hlt_loop_noirq();
+}
+
 lazy_static! {
     /// The IDT lives in static memory so its address remains valid after
     /// `init_idt` returns and the CPU's IDTR keeps pointing at it.
     static ref IDT: InterruptDescriptorTable = {
         let mut idt = InterruptDescriptorTable::new();
+        // Set a default handler for all vectors so unhandled interrupts
+        // (e.g. NMI on vector 2) don't trigger a double fault.
+        for vector in 0..256u8 {
+            idt[vector].set_handler_fn(spurious_handler);
+        }
+
+        // Override with specific handlers
         idt.breakpoint.set_handler_fn(breakpoint_handler);
         unsafe {
             idt.double_fault.set_handler_fn(double_fault_handler)

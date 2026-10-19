@@ -14,6 +14,10 @@ use core::panic::PanicInfo;
 pub static BOOTLOADER_CONFIG: BootloaderConfig = {
     let mut config = BootloaderConfig::new_default();
     config.mappings.physical_memory = Some(Mapping::Dynamic);
+    // The default stack size (80 KiB) is insufficient for lazy_static!
+    // initializers like WRITER (which allocates ~48 KiB for a logical scrollback
+    // buffer on the stack). Increase to 256 KiB to avoid stack overflow.
+    config.kernel_stack_size = 256 * 1024;
     config
 };
 
@@ -162,7 +166,7 @@ fn panic(info: &PanicInfo) -> ! {
     serial_println!("[kernel] PANIC: {}", info);
     // Try VGA too, in case it's set up
     println!("PANIC: {}", info);
-    zero::hlt_loop();
+    zero::hlt_loop_noirq(); // disable IRQs + hlt to avoid NMI re-entry
 }
 
 #[cfg(test)]
