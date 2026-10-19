@@ -19,11 +19,13 @@ impl Display for Framebuffer {
     fn put_pixel(&mut self, x: usize, y: usize, color: u32) {
         if x < self.info.width && y < self.info.height {
             let pixel_offset = y * self.info.stride + x;
-            let color_bytes = color.to_le_bytes(); // Assuming ARGB/RGBA format
-            let byte_offset = pixel_offset * 4;
+            let bytes_per_pixel = self.info.bytes_per_pixel;
+            let byte_offset = pixel_offset * bytes_per_pixel;
             // Ensure we don't go out of bounds of the buffer
-            if byte_offset + 4 <= self.buffer.len() {
-                self.buffer[byte_offset..byte_offset + 4].copy_from_slice(&color_bytes);
+            if byte_offset + bytes_per_pixel <= self.buffer.len() {
+                let color_bytes = color.to_le_bytes();
+                self.buffer[byte_offset..byte_offset + bytes_per_pixel]
+                    .copy_from_slice(&color_bytes[..bytes_per_pixel]);
             }
         }
     }

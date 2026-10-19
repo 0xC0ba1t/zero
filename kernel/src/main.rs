@@ -60,12 +60,17 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
 
     // Now that 0xb8000 is mapped, initialize the physical buffer pointer in WRITER
     zero::vga_buffer::init_physical_buffer();
+    serial_println!("[kernel] VGA physical buffer initialized");
 
     // Initialize framebuffer if available
+    serial_println!("[kernel] checking framebuffer");
     if let Some(fb) = boot_info.framebuffer.as_mut() {
         let info = fb.info();
+        serial_println!("[kernel] framebuffer info: {:?}x{:?} {:?}", info.width, info.height, info.pixel_format);
         let frame_buffer = fb.buffer_mut();
+        serial_println!("[kernel] framebuffer buffer len: {}", frame_buffer.len());
         *zero::graphics::framebuffer::FRAMEBUFFER.lock() = Some(zero::graphics::framebuffer::Framebuffer::new(info, frame_buffer));
+        serial_println!("[kernel] framebuffer stored");
     }
     serial_println!("[kernel] framebuffer checked");
 

@@ -102,6 +102,11 @@ pub fn init() {
     serial_println!("[kernel] initializing PIT");
     time::init_pit();
     serial_println!("[kernel] PIT initialized");
+    serial_println!("[kernel] masking all PIC interrupts");
+    unsafe {
+        interrupts::PICS.lock().write_masks(0xFF, 0xFF);
+    }
+    serial_println!("[kernel] PIC interrupts masked");
     serial_println!("[kernel] enabling interrupts");
     x86_64::instructions::interrupts::enable();
     serial_println!("[kernel] interrupts enabled");
