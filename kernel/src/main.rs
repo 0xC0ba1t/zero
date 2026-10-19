@@ -27,12 +27,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
 
     serial_println!("[kernel] kernel_main reached");
 
-    // In UEFI mode, boot_info.rsdp_addr is Some; legacy BIOS mode leaves it None.
-    // The legacy 8259 PIC and PIT are only available in legacy BIOS mode.
-    let legacy_pic = boot_info.rsdp_addr.into_option().is_none();
-    serial_println!("[kernel] boot mode = {}", if legacy_pic { "legacy BIOS" } else { "UEFI" });
-
-    zero::init(legacy_pic);
+    zero::init();
     serial_println!("[kernel] idt initialized");
 
     let phys_mem_offset_val = boot_info.physical_memory_offset.into_option().unwrap_or(0);
@@ -77,7 +72,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     *zero::fs::FILESYSTEM.lock() = Some(zero::fs::Filesystem::new());
     serial_println!("[kernel] filesystem initialized");
 
-    boot_screen(legacy_pic);
+    boot_screen();
     serial_println!("[kernel] boot_screen done");
 
     #[cfg(test)]
@@ -87,7 +82,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     zero::shell::run();
 }
 
-fn boot_screen(legacy_pic: bool) {
+fn boot_screen() {
     use zero::vga_buffer::{self, Color};
     use alloc::format;
     serial_println!("[kernel] boot_screen starting");
@@ -150,13 +145,11 @@ fn boot_screen(legacy_pic: bool) {
 
     // Footer
     vga_buffer::set_color(Color::White, Color::Black);
-    if legacy_pic {
-        vga_buffer::write_at(25, 24, "Press any key to enter");
+    vga_buffer::write_at(25, 24, "Press any key to enter");
 
-        loop {
-            match zero::input::read_key() {
-                _ => break,
-            }
+    loop {
+        match zero::input::read_key() {
+            _ => break,
         }
     }
     vga_buffer::clear_screen();

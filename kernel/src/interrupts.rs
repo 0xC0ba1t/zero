@@ -16,11 +16,6 @@ pub const PIC_2_OFFSET: u8 = PIC_1_OFFSET + 8;
 pub static PICS: spin::Mutex<ChainedPics> =
     spin::Mutex::new(unsafe { ChainedPics::new(PIC_1_OFFSET, PIC_2_OFFSET) });
 
-/// Whether the system booted in legacy BIOS mode (with the 8259 PIC and PIT
-/// available) or in UEFI mode (where the APIC is required instead).
-/// This is set once during `init()` and read by the PIC initialization code.
-static LEGACY_PIC: spin::Mutex<bool> = spin::Mutex::new(false);
-
 lazy_static! {
     /// The IDT lives in static memory so its address remains valid after
     /// `init_idt` returns and the CPU's IDTR keeps pointing at it.
@@ -46,19 +41,7 @@ lazy_static! {
 }
 
 /// Initialise the IDT.
-///
-/// The IDT always includes timer and keyboard IRQ handlers (vectors 32 and 33).
-/// In legacy BIOS mode (`legacy_pic = true`), the 8259 PIC and PIT are
-/// initialized in `lib::init()` so these handlers will be invoked.  In UEFI
-/// mode (`legacy_pic = false`) the PIC is unavailable and these vectors simply
-/// never fire (APIC-based interrupt routing would be needed for real UEFI
-/// support).
-///
-/// `legacy_pic` controls whether the PIC/PIT are initialized, not whether the
-/// IDT entries exist — those are always registered in the `lazy_static!`
-/// initializer above.
-pub fn init_idt(legacy_pic: bool) {
-    *LEGACY_PIC.lock() = legacy_pic;
+pub fn init_idt() {
     IDT.load();
 }
 
