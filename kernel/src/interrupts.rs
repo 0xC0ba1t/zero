@@ -30,7 +30,7 @@ lazy_static! {
         let mut idt = InterruptDescriptorTable::new();
         // Set a default handler for all vectors so unhandled interrupts
         // (e.g. NMI on vector 2) don't trigger a double fault.
-        for vector in 0..256u8 {
+        for vector in 0..=255u8 {
             idt[vector].set_handler_fn(spurious_handler);
         }
 
