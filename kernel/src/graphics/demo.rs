@@ -1,7 +1,6 @@
 use crate::graphics::display::Display;
 use crate::graphics::cube::Cube;
 use crate::graphics::framebuffer::Framebuffer;
-use crate::input::Key;
 
 pub fn run_demo(display: &mut Framebuffer) {
     let mut cube = Cube::new();
