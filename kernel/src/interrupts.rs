@@ -16,12 +16,15 @@ pub const PIC_2_OFFSET: u8 = PIC_1_OFFSET + 8;
 pub static PICS: spin::Mutex<ChainedPics> =
     spin::Mutex::new(unsafe { ChainedPics::new(PIC_1_OFFSET, PIC_2_OFFSET) });
 
+/// Whether the system booted in legacy BIOS mode (with the 8259 PIC and PIT
+/// available) or in UEFI mode (where the APIC is required instead).
+/// This is set once during `init()` and read by the PIC initialization code.
+static LEGACY_PIC: spin::Mutex<bool> = spin::Mutex::new(false);
+
 lazy_static! {
     /// The IDT lives in static memory so its address remains valid after
     /// `init_idt` returns and the CPU's IDTR keeps pointing at it.
-    /// In UEFI mode the timer/keyboard IRQ entries are left unset because
-    /// the legacy 8259 PIC is unavailable.
-    static ref IDT: spin::Mutex<InterruptDescriptorTable> = {
+    static ref IDT: InterruptDescriptorTable = {
         let mut idt = InterruptDescriptorTable::new();
         idt.breakpoint.set_handler_fn(breakpoint_handler);
         unsafe {
@@ -29,27 +32,34 @@ lazy_static! {
                 .set_stack_index(gdt::DOUBLE_FAULT_IST_INDEX);
         }
         idt.page_fault.set_handler_fn(page_fault_handler);
-        spin::Mutex::new(idt)
+
+        // Register timer and keyboard IRQ handlers. These are only invoked
+        // when the legacy 8259 PIC is initialized (legacy BIOS mode). In UEFI
+        // mode no interrupts fire on these vectors, so the handlers are dormant.
+        idt[InterruptIndex::Timer.as_u8()]
+            .set_handler_fn(timer_interrupt_handler);
+        idt[InterruptIndex::Keyboard.as_u8()]
+            .set_handler_fn(keyboard_interrupt_handler);
+
+        idt
     };
 }
 
 /// Initialise the IDT.
 ///
-/// When `legacy_pic` is `true` the timer and keyboard IRQ handlers (vectors
-/// 32 and 33) are registered and wired to the 8259 PIC.  In UEFI mode the
-/// legacy PIC is unavailable, so those vectors are left unset to avoid
-/// spurious or mis-routed interrupts causing double faults.
+/// The IDT always includes timer and keyboard IRQ handlers (vectors 32 and 33).
+/// In legacy BIOS mode (`legacy_pic = true`), the 8259 PIC and PIT are
+/// initialized in `lib::init()` so these handlers will be invoked.  In UEFI
+/// mode (`legacy_pic = false`) the PIC is unavailable and these vectors simply
+/// never fire (APIC-based interrupt routing would be needed for real UEFI
+/// support).
+///
+/// `legacy_pic` controls whether the PIC/PIT are initialized, not whether the
+/// IDT entries exist — those are always registered in the `lazy_static!`
+/// initializer above.
 pub fn init_idt(legacy_pic: bool) {
-    let mut idt = IDT.lock();
-
-    if legacy_pic {
-        idt[InterruptIndex::Timer.as_u8()]
-            .set_handler_fn(timer_interrupt_handler);
-        idt[InterruptIndex::Keyboard.as_u8()]
-            .set_handler_fn(keyboard_interrupt_handler);
-    }
-
-    idt.load();
+    *LEGACY_PIC.lock() = legacy_pic;
+    IDT.load();
 }
 
 /// handles breakpoint exceptions
