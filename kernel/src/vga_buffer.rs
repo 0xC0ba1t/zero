@@ -13,8 +13,17 @@ lazy_static! {
         scroll_offset: 0,
         color_code: ColorCode::new(Color::Yellow, Color::Black),
         logical_buffer: LogicalBuffer { chars: [[ScreenChar { ascii_character: b' ', color_code: ColorCode::new(Color::Yellow, Color::Black) }; BUFFER_WIDTH]; SCROLLBACK_HEIGHT] },
-        physical_buffer: unsafe { &mut *(0xb8000 as *mut PhysicalBuffer) },
+        physical_buffer: None,
         suspended_render: false,
+    });
+}
+
+/// Initialize the physical VGA buffer pointer.
+/// This must be called after the VGA text buffer has been mapped in the page table.
+pub fn init_physical_buffer() {
+    use x86_64::instructions::interrupts;
+    interrupts::without_interrupts(|| {
+        WRITER.lock().physical_buffer = Some(unsafe { &mut *(0xb8000 as *mut PhysicalBuffer) });
     });
 }
 
@@ -94,7 +103,7 @@ pub struct Writer {
     scroll_offset: usize,
     color_code: ColorCode,
     logical_buffer: LogicalBuffer,
-    physical_buffer: &'static mut PhysicalBuffer,
+    physical_buffer: Option<&'static mut PhysicalBuffer>,
     suspended_render: bool,
 }
 
@@ -185,14 +194,17 @@ impl Writer {
     }
 
     fn render_row(&mut self, row: usize) {
+        let Some(ref mut physical_buffer) = self.physical_buffer else {
+            return;
+        };
         let logical_row = self.scroll_offset + row;
         if logical_row < SCROLLBACK_HEIGHT {
             for col in 0..BUFFER_WIDTH {
-                self.physical_buffer.chars[row][col].write(self.logical_buffer.chars[logical_row][col]);
+                physical_buffer.chars[row][col].write(self.logical_buffer.chars[logical_row][col]);
             }
         } else {
             for col in 0..BUFFER_WIDTH {
-                self.physical_buffer.chars[row][col].write(ScreenChar {
+                physical_buffer.chars[row][col].write(ScreenChar {
                     ascii_character: b' ',
                     color_code: self.color_code,
                 });

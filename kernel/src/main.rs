@@ -58,6 +58,9 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     }
     serial_println!("[kernel] VGA buffer mapped");
 
+    // Now that 0xb8000 is mapped, initialize the physical buffer pointer in WRITER
+    vga_buffer::init_physical_buffer();
+
     // Initialize framebuffer if available
     if let Some(fb) = boot_info.framebuffer.as_mut() {
         let info = fb.info();
