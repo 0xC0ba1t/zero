@@ -28,16 +28,17 @@ lazy_static! {
     /// `init_idt` returns and the CPU's IDTR keeps pointing at it.
     static ref IDT: InterruptDescriptorTable = {
         let mut idt = InterruptDescriptorTable::new();
-        // Set a default handler for all vectors so unhandled interrupts
-        // (e.g. NMI on vector 2) don't trigger a double fault.
-        // Skip exception vectors that panic when set_handler_fn is called:
-        //   - Error-code exceptions (8, 10-14, 17, 21, 29, 30, 31) need a
-        //     handler with an error-code parameter (specific handlers below).
-        //   - Vector 15 is reserved by the x86_64 crate.
-        const SKIP_VECTORS: [u8; 12] =
-            [8, 10, 11, 12, 13, 14, 15, 17, 21, 29, 30, 31];
+        // Set a default handler for all "safe" vectors so unhandled
+        // interrupts/exceptions (e.g. NMI on vector 2) don't trigger a
+        // double fault. Skip vectors that x86_64 panics on:
+        //   - Error-code exceptions (8, 10-14, 17, 21, 29, 30, 31)
+        //   - Reserved (9, 15)
+        //   - Diverging/must-not-return (18)
+        // Those get specific typed handlers below or use CPU defaults.
+        const UNSAFE_VECTORS: [u8; 15] =
+            [8, 9, 10, 11, 12, 13, 14, 15, 17, 18, 21, 29, 30, 31];
         for vector in 0..=255u8 {
-            if SKIP_VECTORS.contains(&vector) {
+            if UNSAFE_VECTORS.contains(&vector) {
                 continue;
             }
             idt[vector].set_handler_fn(spurious_handler);
