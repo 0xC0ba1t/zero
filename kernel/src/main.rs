@@ -27,7 +27,12 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
 
     serial_println!("[kernel] kernel_main reached");
 
-    zero::init(); // init idt <Interrupt Descriptor Table>
+    // In UEFI mode, boot_info.rsdp_addr is Some; legacy BIOS mode leaves it None.
+    // The legacy 8259 PIC and PIT are only available in legacy BIOS mode.
+    let legacy_pic = boot_info.rsdp_addr.into_option().is_none();
+    serial_println!("[kernel] boot mode = {}", if legacy_pic { "legacy BIOS" } else { "UEFI" });
+
+    zero::init(legacy_pic);
     serial_println!("[kernel] idt initialized");
 
     let phys_mem_offset_val = boot_info.physical_memory_offset.into_option().unwrap_or(0);
@@ -64,7 +69,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // Initialize framebuffer if available
     if let Some(fb) = boot_info.framebuffer.as_mut() {
         let info = fb.info();
-        let frame_buffer = unsafe { fb.buffer_mut() };
+        let frame_buffer = fb.buffer_mut();
         *zero::graphics::framebuffer::FRAMEBUFFER.lock() = Some(zero::graphics::framebuffer::Framebuffer::new(info, frame_buffer));
     }
     serial_println!("[kernel] framebuffer checked");
@@ -72,7 +77,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     *zero::fs::FILESYSTEM.lock() = Some(zero::fs::Filesystem::new());
     serial_println!("[kernel] filesystem initialized");
 
-    boot_screen();
+    boot_screen(legacy_pic);
     serial_println!("[kernel] boot_screen done");
 
     #[cfg(test)]
@@ -82,7 +87,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     zero::shell::run();
 }
 
-fn boot_screen() {
+fn boot_screen(legacy_pic: bool) {
     use zero::vga_buffer::{self, Color};
     use alloc::format;
     serial_println!("[kernel] boot_screen starting");
@@ -145,11 +150,13 @@ fn boot_screen() {
 
     // Footer
     vga_buffer::set_color(Color::White, Color::Black);
-    vga_buffer::write_at(25, 24, "Press any key to enter");
+    if legacy_pic {
+        vga_buffer::write_at(25, 24, "Press any key to enter");
 
-    loop {
-        match zero::input::read_key() {
-            _ => break,
+        loop {
+            match zero::input::read_key() {
+                _ => break,
+            }
         }
     }
     vga_buffer::clear_screen();

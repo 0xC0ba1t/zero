@@ -10,27 +10,46 @@ use pic8259::ChainedPics;
 use spin;
 use crate::hlt_loop;
 
+pub const PIC_1_OFFSET: u8 = 32;
+pub const PIC_2_OFFSET: u8 = PIC_1_OFFSET + 8;
+
+pub static PICS: spin::Mutex<ChainedPics> =
+    spin::Mutex::new(unsafe { ChainedPics::new(PIC_1_OFFSET, PIC_2_OFFSET) });
+
 lazy_static! {
-    static ref IDT: InterruptDescriptorTable = {
+    /// The IDT lives in static memory so its address remains valid after
+    /// `init_idt` returns and the CPU's IDTR keeps pointing at it.
+    /// In UEFI mode the timer/keyboard IRQ entries are left unset because
+    /// the legacy 8259 PIC is unavailable.
+    static ref IDT: spin::Mutex<InterruptDescriptorTable> = {
         let mut idt = InterruptDescriptorTable::new();
         idt.breakpoint.set_handler_fn(breakpoint_handler);
         unsafe {
             idt.double_fault.set_handler_fn(double_fault_handler)
                 .set_stack_index(gdt::DOUBLE_FAULT_IST_INDEX);
         }
+        idt.page_fault.set_handler_fn(page_fault_handler);
+        spin::Mutex::new(idt)
+    };
+}
+
+/// Initialise the IDT.
+///
+/// When `legacy_pic` is `true` the timer and keyboard IRQ handlers (vectors
+/// 32 and 33) are registered and wired to the 8259 PIC.  In UEFI mode the
+/// legacy PIC is unavailable, so those vectors are left unset to avoid
+/// spurious or mis-routed interrupts causing double faults.
+pub fn init_idt(legacy_pic: bool) {
+    let mut idt = IDT.lock();
+
+    if legacy_pic {
         idt[InterruptIndex::Timer.as_u8()]
             .set_handler_fn(timer_interrupt_handler);
         idt[InterruptIndex::Keyboard.as_u8()]
             .set_handler_fn(keyboard_interrupt_handler);
+    }
 
-        idt.page_fault.set_handler_fn(page_fault_handler);
-
-        idt
-    };
-}
-
-pub fn init_idt() {
-    IDT.load();
+    idt.load();
 }
 
 /// handles breakpoint exceptions
@@ -60,12 +79,6 @@ extern "x86-interrupt" fn page_fault_handler(
     println!("{:#?}", stack_frame);
     hlt_loop();
 }
-
-pub const PIC_1_OFFSET: u8 = 32;
-pub const PIC_2_OFFSET: u8 = PIC_1_OFFSET + 8;
-
-pub static PICS: spin::Mutex<ChainedPics> =
-    spin::Mutex::new(unsafe { ChainedPics::new(PIC_1_OFFSET, PIC_2_OFFSET) });
 
 extern "x86-interrupt" fn timer_interrupt_handler(
     _stack_frame: InterruptStackFrame)

@@ -79,11 +79,18 @@ pub fn hlt_loop() -> ! {
     }
 }
 
-pub fn init() {
+/// Initialize the GDT, IDT, and interrupt controllers.
+///
+/// `legacy_pic` should be `true` when booted via legacy BIOS (where the 8259 PIC
+/// and PIT are available), and `false` when booted via UEFI (where the APIC must
+/// be used instead — timer/keyboard IRQs are not routed through the legacy PIC).
+pub fn init(legacy_pic: bool) {
     gdt::init();
-    interrupts::init_idt();
-    unsafe { interrupts::PICS.lock().initialize() };
-    time::init_pit();
+    interrupts::init_idt(legacy_pic);
+    if legacy_pic {
+        unsafe { interrupts::PICS.lock().initialize() };
+        time::init_pit();
+    }
     x86_64::instructions::interrupts::enable();
 }
 
@@ -117,7 +124,8 @@ fn test_kernel_main(boot_info: &'static mut BootInfo) -> ! {
     use crate::memory::BootInfoFrameAllocator;
     use x86_64::VirtAddr;
 
-    init();
+    let legacy_pic = boot_info.rsdp_addr.into_option().is_none();
+    init(legacy_pic);
 
     // many tests allocate (shell parser, line editor, history), so they need a heap
     let phys_mem_offset = VirtAddr::new(boot_info.physical_memory_offset.into_option().unwrap_or(0));
