@@ -22,13 +22,19 @@ lazy_static! {
 /// This must be called after the VGA text buffer has been mapped in the page table.
 pub fn init_physical_buffer() {
     use x86_64::instructions::interrupts;
+    crate::serial_println!("[kernel] inside init_physical_buffer");
     interrupts::without_interrupts(|| {
+        crate::serial_println!("[kernel] inside without_interrupts");
+        let mut guard = WRITER.lock();
+        crate::serial_println!("[kernel] WRITER locked");
         // Set the physical buffer pointer to the VGA text buffer at 0xb8000.
         // This must be done with interrupts disabled and the WRITER mutex held
         // to prevent the timer interrupt handler from calling into the Writer
         // while it's in an inconsistent state.
-        WRITER.lock().physical_buffer = Some(unsafe { &mut *(0xb8000 as *mut PhysicalBuffer) });
+        guard.physical_buffer = Some(unsafe { &mut *(0xb8000 as *mut PhysicalBuffer) });
+        crate::serial_println!("[kernel] physical_buffer set");
     });
+    crate::serial_println!("[kernel] init_physical_buffer returning");
 }
 
 /// The standard color palette in VGA text mode.
