@@ -30,17 +30,17 @@ lazy_static! {
         let mut idt = InterruptDescriptorTable::new();
         // Set a default handler for all "safe" vectors so unhandled
         // interrupts/exceptions (e.g. NMI on vector 2) don't trigger a
-        // double fault. Skip vectors that x86_64 panics on:
-        //   - Error-code exceptions (8, 10-14, 17, 21, 29, 30, 31)
-        //   - Reserved (9, 15)
-        //   - Diverging/must-not-return (18)
+        // double fault. The x86_64 crate panics if set_handler_fn is
+        // called on error-code exceptions (8, 10-14, 17, 21, 29, 30, 31),
+        // reserved vectors (9, 15, 22-28), or diverging entries (18).
         // Those get specific typed handlers below or use CPU defaults.
-        const UNSAFE_VECTORS: [u8; 15] =
-            [8, 9, 10, 11, 12, 13, 14, 15, 17, 18, 21, 22, 29, 30, 31];
-        for vector in 0..=255u8 {
-            if UNSAFE_VECTORS.contains(&vector) {
-                continue;
-            }
+        const SAFE_EXCEPTIONS: [u8; 10] = [0, 1, 2, 4, 5, 6, 7, 16, 19, 20];
+        // Set handlers for safe exception vectors
+        for &vector in &SAFE_EXCEPTIONS {
+            idt[vector].set_handler_fn(spurious_handler);
+        }
+        // Set handlers for all hardware interrupt vectors (32-255)
+        for vector in 32..=255u8 {
             idt[vector].set_handler_fn(spurious_handler);
         }
 
