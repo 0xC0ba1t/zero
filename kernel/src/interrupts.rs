@@ -30,15 +30,14 @@ lazy_static! {
         let mut idt = InterruptDescriptorTable::new();
         // Set a default handler for all vectors so unhandled interrupts
         // (e.g. NMI on vector 2) don't trigger a double fault.
-        // Exception vectors that carry an error code (8, 10-14, 17, 21,
-        // 29, 30, 31) panic if set_handler_fn is called on them — they
-        // require a handler with an error-code parameter. Those get
-        // specific handlers below (double_fault, page_fault, breakpoint)
-        // or remain unset (default CPU behavior → double fault).
-        const ERROR_CODE_EXCEPTIONS: [u8; 11] =
-            [8, 10, 11, 12, 13, 14, 17, 21, 29, 30, 31];
+        // Skip exception vectors that panic when set_handler_fn is called:
+        //   - Error-code exceptions (8, 10-14, 17, 21, 29, 30, 31) need a
+        //     handler with an error-code parameter (specific handlers below).
+        //   - Vector 15 is reserved by the x86_64 crate.
+        const SKIP_VECTORS: [u8; 12] =
+            [8, 10, 11, 12, 13, 14, 15, 17, 21, 29, 30, 31];
         for vector in 0..=255u8 {
-            if ERROR_CODE_EXCEPTIONS.contains(&vector) {
+            if SKIP_VECTORS.contains(&vector) {
                 continue;
             }
             idt[vector].set_handler_fn(spurious_handler);
