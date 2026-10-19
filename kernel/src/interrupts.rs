@@ -23,15 +23,6 @@ extern "x86-interrupt" fn spurious_handler(_stack_frame: InterruptStackFrame) {
     crate::hlt_loop_noirq();
 }
 
-/// Handler for spurious / unhandled exceptions that carry an error code.
-/// Logs and halts so we can see what fired.
-extern "x86-interrupt" fn spurious_handler_with_err(
-    _stack_frame: InterruptStackFrame, _error_code: u64,
-) {
-    crate::serial_println!("[kernel] spurious exception with error code fired");
-    crate::hlt_loop_noirq();
-}
-
 lazy_static! {
     /// The IDT lives in static memory so its address remains valid after
     /// `init_idt` returns and the CPU's IDTR keeps pointing at it.
@@ -39,18 +30,15 @@ lazy_static! {
         let mut idt = InterruptDescriptorTable::new();
         // Set a default handler for all vectors so unhandled interrupts
         // (e.g. NMI on vector 2) don't trigger a double fault.
-        // Skip exception vectors that carry an error code (8, 10-14, 17,
-        // 21, 29, 30, 31) — set_handler_fn panics on those because the
-        // handler signature must include the error code. Those entries
-        // get specific handlers below anyway (double_fault, page_fault,
-        // breakpoint). Any remaining error-code exception without a
-        // specific handler will use the CPU's default behavior.
+        // Exception vectors that carry an error code (8, 10-14, 17, 21,
+        // 29, 30, 31) panic if set_handler_fn is called on them — they
+        // require a handler with an error-code parameter. Those get
+        // specific handlers below (double_fault, page_fault, breakpoint)
+        // or remain unset (default CPU behavior → double fault).
         const ERROR_CODE_EXCEPTIONS: [u8; 11] =
             [8, 10, 11, 12, 13, 14, 17, 21, 29, 30, 31];
         for vector in 0..=255u8 {
             if ERROR_CODE_EXCEPTIONS.contains(&vector) {
-                // Skip: these get specific handlers below (double_fault, page_fault)
-                // or are set after the loop with their error-code-aware handlers.
                 continue;
             }
             idt[vector].set_handler_fn(spurious_handler);
@@ -63,14 +51,6 @@ lazy_static! {
                 .set_stack_index(gdt::DOUBLE_FAULT_IST_INDEX);
         }
         idt.page_fault.set_handler_fn(page_fault_handler);
-
-        // Set error-code-aware spurious handlers for the remaining
-        // exception vectors (10, 11, 12, 13, 17, 21, 29, 30, 31).
-        // Vectors 8 (double fault) and 14 (page fault) are already
-        // handled above with their specific handlers.
-        for &vector in &[10u8, 11, 12, 13, 17, 21, 29, 30, 31] {
-            idt[vector].set_handler_fn(spurious_handler_with_err);
-        }
 
         // Register timer and keyboard IRQ handlers. These are only invoked
         // when the legacy 8259 PIC is initialized (legacy BIOS mode). In UEFI
