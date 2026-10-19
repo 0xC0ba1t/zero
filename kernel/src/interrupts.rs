@@ -35,7 +35,7 @@ lazy_static! {
         //   - Reserved (9, 15)
         //   - Diverging/must-not-return (18)
         // Those get specific typed handlers below or use CPU defaults.
-        const UNSAFE_VECTORS: [u8; 15] =
+        const UNSAFE_VECTORS: [u8; 14] =
             [8, 9, 10, 11, 12, 13, 14, 15, 17, 18, 21, 29, 30, 31];
         for vector in 0..=255u8 {
             if UNSAFE_VECTORS.contains(&vector) {
