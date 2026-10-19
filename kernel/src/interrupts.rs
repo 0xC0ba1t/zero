@@ -19,7 +19,7 @@ pub static PICS: spin::Mutex<ChainedPics> =
 /// Handler for spurious / unhandled interrupts (e.g. NMI on vector 2).
 /// Logs and halts so we can see what fired.
 extern "x86-interrupt" fn spurious_handler(_stack_frame: InterruptStackFrame) {
-    serial_println!("[kernel] spurious/unhandled interrupt fired");
+    crate::serial_println!("[kernel] spurious/unhandled interrupt fired");
     crate::hlt_loop_noirq();
 }
 
