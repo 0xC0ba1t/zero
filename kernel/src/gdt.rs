@@ -24,23 +24,33 @@ lazy_static! {
     static ref GDT: (GlobalDescriptorTable, Selectors) = {
         let mut gdt = GlobalDescriptorTable::new();
         let code_selector = gdt.append(Descriptor::kernel_code_segment());
+        let data_selector = gdt.append(Descriptor::kernel_data_segment());
         let tss_selector = gdt.append(Descriptor::tss_segment(&TSS));
-        (gdt, Selectors { code_selector, tss_selector })
+        (gdt, Selectors { code_selector, data_selector, tss_selector })
     };
 }
 
 struct Selectors {
     code_selector: SegmentSelector,
+    data_selector: SegmentSelector,
     tss_selector: SegmentSelector,
 }
 
 pub fn init() {
     use x86_64::instructions::tables::load_tss;
-    use x86_64::instructions::segmentation::{CS, Segment};
-    
+    use x86_64::instructions::segmentation::{CS, DS, ES, SS, Segment};
+
     GDT.0.load();
     unsafe {
         CS::set_reg(GDT.1.code_selector);
+        // Other segment registers still reference the old GDT's selectors.
+        // In 64-bit mode only the RPL (bits 0-1) matter for most, but
+        // SS must point to a valid data-segment descriptor in the *new*
+        // GDT, otherwise stack pushes during interrupt handling #GP and
+        // trigger a double fault.
+        SS::set_reg(GDT.1.data_selector);
+        DS::set_reg(GDT.1.data_selector);
+        ES::set_reg(GDT.1.data_selector);
         load_tss(GDT.1.tss_selector);
     }
 }

@@ -79,6 +79,15 @@ pub fn hlt_loop() -> ! {
     }
 }
 
+/// Halt the CPU with interrupts disabled, preventing nested interrupts
+/// from firing during a halt loop (e.g. when the timer fires every 10ms).
+pub fn hlt_loop_noirq() -> ! {
+    x86_64::instructions::interrupts::disable();
+    loop {
+        x86_64::instructions::hlt();
+    }
+}
+
 /// Initialize the GDT, IDT, and interrupt controllers.
 pub fn init() {
     serial_println!("[kernel] loading GDT");

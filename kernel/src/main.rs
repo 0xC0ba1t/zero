@@ -159,6 +159,9 @@ fn boot_screen() {
 #[cfg(not(test))]
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
+    // Disable interrupts immediately to prevent nested double faults
+    // from timer interrupts firing during panic handling.
+    x86_64::instructions::interrupts::disable();
     serial_println!("[kernel] PANIC: {}", info);
     // Try VGA too, in case it's set up
     println!("PANIC: {}", info);
