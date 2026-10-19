@@ -18,7 +18,11 @@ pub static PICS: spin::Mutex<ChainedPics> =
 /// Handler for spurious / unhandled interrupts (e.g. NMI on vector 2).
 /// Logs and halts so we can see what fired.
 extern "x86-interrupt" fn spurious_handler(_stack_frame: InterruptStackFrame) {
-    crate::serial_println!("[kernel] spurious/unhandled interrupt fired");
+    // Use a raw UART write instead of serial_println! to avoid potential
+    // deadlock if the main thread is holding the SERIAL1 mutex when an
+    // NMI fires. The x86_64-interrupt ABI saves a new interrupt stack,
+    // but the spinlock inside serial_println! would still deadlock.
+    crate::serial::write_raw(b"[kernel] spurious interrupt\n");
     crate::hlt_loop_noirq();
 }
 

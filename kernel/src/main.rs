@@ -73,13 +73,14 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     *zero::fs::FILESYSTEM.lock() = Some(zero::fs::Filesystem::new());
     serial_println!("[kernel] filesystem initialized");
 
-    // Unmask keyboard and timer IRQs (they were masked in init() to prevent
-    // spurious interrupts during early boot). Now that the IDT, PIC, PIT, heap,
-    // and VGA are all set up, we can safely receive keyboard input.
+    // Unmask only keyboard IRQ (IRQ1, bit 1) for now.
+    // Keep timer masked to avoid issues during boot screen.
+    // 0xFD = 11111101 — unmask only IRQ1
+    serial_println!("[kernel] unmasking keyboard IRQ");
     unsafe {
-        zero::interrupts::PICS.lock().write_masks(0x00, 0x00);
+        zero::interrupts::PICS.lock().write_masks(0xFD, 0xFF);
     }
-    serial_println!("[kernel] IRQs unmasked");
+    serial_println!("[kernel] keyboard IRQ unmasked");
 
     boot_screen();
     serial_println!("[kernel] boot_screen done");
