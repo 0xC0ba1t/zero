@@ -256,7 +256,7 @@ impl Writer {
     /// (if one is active), so graphical QEMU output stays in sync with text-mode
     /// writes from the shell.
     pub fn blit_to_framebuffer(&mut self) {
-        let Some(fb_guard) = crate::graphics::framebuffer::FRAMEBUFFER.try_lock() else { return };
+        let Some(mut fb_guard) = crate::graphics::framebuffer::FRAMEBUFFER.try_lock() else { return };
         let Some(ref mut framebuffer) = *fb_guard else { return };
 
         use crate::graphics::font;
