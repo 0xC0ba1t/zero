@@ -2,7 +2,7 @@
 #![no_main]
 #![feature(custom_test_frameworks)]
 #![test_runner(zero::test_runner)]
-#![reexport_test_harness_modules = "test_main"]
+#![reexport_test_harness_main = "test_main"]
 
 extern crate alloc;
 
@@ -88,7 +88,6 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
 
 fn boot_screen() {
     use zero::graphics::font;
-    use zero::graphics::display::Display as _;
     use zero::graphics::framebuffer::{self, CONSOLE};
     use alloc::format;
 
