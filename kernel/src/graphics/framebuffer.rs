@@ -201,7 +201,7 @@ impl FbConsole {
                 let px = col * CHAR_W;
                 let py = (screen_row - start) * CHAR_H;
                 if let Some(ref mut fb) = *fb_guard {
-                    crate::graphics::font::draw_char(fb, px, py, ch as u8, self.fg, self.bg);
+                    crate::graphics::font::draw_char(fb, px, py, *ch as u8, self.fg, self.bg);
                 }
             }
         }
