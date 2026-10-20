@@ -267,8 +267,8 @@ impl Writer {
         for row in 0..BUFFER_HEIGHT {
             for col in 0..BUFFER_WIDTH {
                 let ch = self.logical_buffer.chars[row + self.scroll_offset][col];
-                let fg = vga_color_to_fb(ch.color_code.0 & 0x0F);
-                let bg = vga_color_to_fb((ch.color_code.0 >> 4) & 0x0F);
+                let fg = Self::vga_color_to_fb(ch.color_code.0 & 0x0F);
+                let bg = Self::vga_color_to_fb((ch.color_code.0 >> 4) & 0x0F);
                 // Always draw background (even black) so the framebuffer is
                 // fully overwritten on clear.
                 let glyph = font::glyph(ch.ascii_character);
