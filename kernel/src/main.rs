@@ -67,8 +67,17 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     zero::vga_buffer::init_physical_buffer();
     serial_println!("[kernel] VGA physical buffer initialized");
 
-    // Initialize framebuffer if available
-    serial_println!("[kernel] skipping framebuffer init for now");
+    // Initialize framebuffer from bootloader-provided info
+    if let Some(mut fb) = boot_info.framebuffer.take() {
+        let info = fb.info();
+        let buffer = fb.into_buffer();
+        *zero::graphics::framebuffer::FRAMEBUFFER.lock() = Some(
+            zero::graphics::framebuffer::Framebuffer::new(info, buffer)
+        );
+        serial_println!("[kernel] framebuffer initialized: {}x{}", info.width, info.height);
+    } else {
+        serial_println!("[kernel] no framebuffer provided by bootloader");
+    }
 
     *zero::fs::FILESYSTEM.lock() = Some(zero::fs::Filesystem::new());
     serial_println!("[kernel] filesystem initialized");
@@ -81,6 +90,35 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         zero::interrupts::PICS.lock().write_masks(0xFD, 0xFF);
     }
     serial_println!("[kernel] keyboard IRQ unmasked");
+
+    // Clear the framebuffer and render a simple splash screen so the user
+    // can see that the kernel is alive. We draw a few stars on a dark
+    // background — the full boot screen with text goes to the VGA text
+    // buffer at 0xb8000.
+    {
+        let mut fb_guard = zero::graphics::framebuffer::FRAMEBUFFER.lock();
+        if let Some(ref mut framebuffer) = *fb_guard {
+            framebuffer.clear();
+            let width = framebuffer.width();
+            let height = framebuffer.height();
+            // Draw stars at fixed positions (like the VGA boot screen)
+            let stars = [
+                (5 * width / 80, 5 * height / 25),
+                (40 * width / 80, 4 * height / 25),
+                (70 * width / 80, 20 * height / 25),
+                (30 * width / 80, 18 * height / 25),
+            ];
+            for &(x, y) in &stars {
+                for dy in 0..3usize {
+                    for dx in 0..3usize {
+                        if x + dx < width && y + dy < height {
+                            framebuffer.put_pixel(x + dx, y + dy, 0xFFFFFF);
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     boot_screen();
     serial_println!("[kernel] boot_screen done");
