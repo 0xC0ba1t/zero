@@ -216,6 +216,11 @@ impl FbConsole {
             b'\n' => {
                 self.col = 0;
                 self.row += 1;
+                if self.row >= self.rows {
+                    self.scrollback.drain(0..1);
+                    self.row = self.rows - 1;
+                    self.redraw();
+                }
             }
             b'\r' => {
                 self.col = 0;
@@ -229,9 +234,10 @@ impl FbConsole {
                     self.row += 1;
                 }
                 if self.row >= self.rows {
-                    // Scroll: drop oldest scrollback row
+                    // Scroll: drop oldest scrollback row and redraw
                     self.scrollback.drain(0..1);
                     self.row = self.rows - 1;
+                    self.redraw();
                 }
                 // Ensure scrollback has enough rows
                 while self.scrollback.len() <= self.row {
