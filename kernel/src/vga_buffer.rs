@@ -152,7 +152,7 @@ impl Writer {
         if column >= BUFFER_WIDTH || row >= BUFFER_HEIGHT {
             return;
         }
-        self.logical_buffer.chars[row + self.scroll_offset][column] = ScreenChar {
+        self.logical_buffer.chars[row][column] = ScreenChar {
             ascii_character: byte,
             color_code: self.color_code,
         };
