@@ -194,7 +194,7 @@ impl FbConsole {
             if screen_row - start >= self.rows {
                 break;
             }
-            for (col, ch) in entry.chars().enumerate() {
+            for (col, ch) in entry.iter().enumerate() {
                 if col >= self.cols {
                     break;
                 }
@@ -283,7 +283,7 @@ impl core::fmt::Write for FbConsole {
 #[macro_export]
 macro_rules! fb_print {
     ($($arg:tt)*) => {
-        $crate::graphics::framebuffer::_fb_print(format_args!($($arg)*));
+        $crate::graphics::framebuffer::_fb_print(format_args!($($arg)*))
     };
 }
 

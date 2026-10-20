@@ -278,7 +278,7 @@ fn color(args: &[String]) -> Result<(), CommandError> {
             Ok(())
         }
         [name] => {
-            let foreground = crate::graphics::framebuffer::CONSOLE.lock().color_from_name(name)
+            let foreground = crate::graphics::framebuffer::FbConsole::color_from_name(name)
                 .ok_or(CommandError::Failed("unknown color"))?;
             crate::graphics::framebuffer::CONSOLE.lock().set_fg_bg(foreground, 0x000000);
             Ok(())
