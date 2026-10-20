@@ -66,7 +66,7 @@ impl Host for KernelHost {
     fn plot(&mut self, x: i32, y: i32, ch: u8) {
         if x < 0 || y < 0 { return; }
         let mut console = crate::graphics::framebuffer::CONSOLE.lock();
-        console.write_at(x as usize, y as usize, core::str::from_utf8(&[ch]).unwrap_or(" "));
+        console.write_byte_at(x as usize, y as usize, ch);
     }
 
     fn set_color(&mut self, color: u8) {
@@ -76,12 +76,11 @@ impl Host for KernelHost {
     }
 
     fn key(&mut self) -> i32 {
-        // drain the queue so a held key can't build up a backlog; the last key wins
-        let mut last = 0;
-        while let Some(key) = input::try_read_key() {
-            last = key_code(key);
+        if let Some(key) = input::try_read_key() {
+            key_code(key)
+        } else {
+            0
         }
-        last
     }
 
     fn wait_key(&mut self) -> i32 {

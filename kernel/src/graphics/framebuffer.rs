@@ -179,6 +179,21 @@ impl FbConsole {
         }
     }
 
+    /// Write a single byte at a specific (col, row) position in the text grid.
+    pub fn write_byte_at(&mut self, col: usize, row: usize, byte: u8) {
+        if !self.initialized {
+            return;
+        }
+        let mut fb_guard = FRAMEBUFFER.lock();
+        if let Some(ref mut fb) = *fb_guard {
+            if col < self.cols && row < self.rows {
+                let px = col * CHAR_W;
+                let py = row * CHAR_H;
+                crate::graphics::font::draw_char(fb, px, py, byte, self.fg, self.bg);
+            }
+        }
+    }
+
     /// Redraw the entire visible region from scrollback.
     fn redraw(&mut self) {
         let mut fb_guard = FRAMEBUFFER.lock();
@@ -227,6 +242,23 @@ impl FbConsole {
             }
             b'\t' => {
                 self.col = (self.col + 8) & !7;
+            }
+            b'\u{8}' | b'\u{7f}' => {
+                if self.col > 0 {
+                    self.col -= 1;
+                    let col = self.col;
+                    let row = self.row;
+                    let row_vec = &mut self.scrollback[row];
+                    if col < row_vec.len() {
+                        row_vec[col] = ' ';
+                    }
+                    let px = col * CHAR_W;
+                    let py = row * CHAR_H;
+                    let mut fb_guard = FRAMEBUFFER.lock();
+                    if let Some(ref mut fb) = *fb_guard {
+                        crate::graphics::font::draw_char(fb, px, py, b' ', self.fg, self.bg);
+                    }
+                }
             }
             byte => {
                 if self.col >= self.cols {
