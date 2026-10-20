@@ -92,36 +92,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     }
     serial_println!("[kernel] keyboard IRQ unmasked");
 
-    // Clear the framebuffer and render a simple splash screen so the user
-    // can see that the kernel is alive. We draw a few stars on a dark
-    // background — the full boot screen with text goes to the VGA text
-    // buffer at 0xb8000.
-    {
-        let mut fb_guard = zero::graphics::framebuffer::FRAMEBUFFER.lock();
-        if let Some(ref mut framebuffer) = *fb_guard {
-            framebuffer.clear();
-            let width = framebuffer.width();
-            let height = framebuffer.height();
-            // Draw stars at fixed positions (like the VGA boot screen)
-            let stars = [
-                (5 * width / 80, 5 * height / 25),
-                (40 * width / 80, 4 * height / 25),
-                (70 * width / 80, 20 * height / 25),
-                (30 * width / 80, 18 * height / 25),
-            ];
-            for &(x, y) in &stars {
-                for dy in 0..3usize {
-                    for dx in 0..3usize {
-                        if x + dx < width && y + dy < height {
-                            framebuffer.put_pixel(x + dx, y + dy, 0xFFFFFF);
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    boot_screen();
+    // Render the full boot screen to the framebuffer so it's visible in QEMU.
+    boot_screen_fb();
     serial_println!("[kernel] boot_screen done");
 
     #[cfg(test)]
@@ -131,10 +103,122 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     zero::shell::run();
 }
 
-fn boot_screen() {
+fn boot_screen_fb() {
+    use zero::graphics::font;
+    use zero::graphics::display::Display as _;
+    use alloc::format;
+
+    serial_println!("[kernel] boot_screen starting");
+
+    let mut fb_guard = zero::graphics::framebuffer::FRAMEBUFFER.lock();
+    let framebuffer = match fb_guard.as_mut() {
+        Some(fb) => fb,
+        None => {
+            serial_println!("[kernel] no framebuffer, falling back to VGA text");
+            boot_screen_vga();
+            return;
+        }
+    };
+
+    // Clear the framebuffer to black
+    framebuffer.clear();
+
+    let white: u32 = 0xFFFFFF;
+    let light_gray: u32 = 0xD3D3D3;
+    let dark_gray: u32 = 0xA9A9A9;
+
+    // Map VGA text positions (80 cols × 25 rows) to framebuffer pixel positions.
+    // Each character cell is 8px wide × 8px tall with a 2px gap.
+    let cell_w = font::CHAR_WIDTH + 2;
+    let cell_h = font::CHAR_HEIGHT + 2;
+
+    // Top and bottom separator lines (dotted)
+    let dots = "................................................................................";
+    font::draw_text(framebuffer, 0, cell_h, dots, white, 0);
+    font::draw_text(framebuffer, 0, 2 * cell_h, dots, white, 0);
+    font::draw_text(framebuffer, 0, 23 * cell_h, dots, white, 0);
+
+    // Welcome message (over the first separator line position)
+    let version = env!("CARGO_PKG_VERSION");
+    let welcome = format!("Welcome to Zero v{}", version);
+    font::draw_text(framebuffer, 0, 0, &welcome, white, 0);
+
+    // Stars (using the * character from our font)
+    font::draw_block_char(framebuffer, 5, 5, b'*', white, 0);
+    font::draw_block_char(framebuffer, 40, 4, b'*', white, 0);
+    font::draw_block_char(framebuffer, 70, 20, b'*', white, 0);
+    font::draw_block_char(framebuffer, 30, 18, b'*', white, 0);
+
+    // Cloud 1 (DarkGray full block + LightGray light block for edges)
+    for x in 10..25 { font::draw_block_char(framebuffer, x, 6, 219, dark_gray, 0); }
+    for x in 12..22 { font::draw_block_char(framebuffer, x, 5, 219, dark_gray, 0); }
+    font::draw_block_char(framebuffer, 25, 6, 176, light_gray, 0);
+    font::draw_block_char(framebuffer, 9, 6, 176, light_gray, 0);
+
+    // Cloud 2
+    for x in 50..65 { font::draw_block_char(framebuffer, x, 15, 219, dark_gray, 0); }
+    for x in 52..62 { font::draw_block_char(framebuffer, x, 14, 219, dark_gray, 0); }
+    font::draw_block_char(framebuffer, 65, 15, 176, light_gray, 0);
+    font::draw_block_char(framebuffer, 49, 15, 176, light_gray, 0);
+
+    // Moon (C-shape with shading) — replicate the VGA text art in framebuffer
+    // Top tip
+    font::draw_block_char(framebuffer, 68, 3, 219, white, 0);
+    font::draw_block_char(framebuffer, 69, 3, 219, white, 0);
+    font::draw_block_char(framebuffer, 70, 3, 178, light_gray, 0);
+    font::draw_block_char(framebuffer, 71, 3, 177, light_gray, 0);
+    font::draw_block_char(framebuffer, 66, 4, 219, white, 0);
+    font::draw_block_char(framebuffer, 67, 4, 219, white, 0);
+    font::draw_block_char(framebuffer, 72, 4, 176, light_gray, 0);
+    // Middle body
+    for y in 5..9 {
+        font::draw_block_char(framebuffer, 65, y, 219, white, 0);
+        font::draw_block_char(framebuffer, 66, y, 219, white, 0);
+    }
+    // Shading on body
+    font::draw_block_char(framebuffer, 67, 5, 178, light_gray, 0);
+    font::draw_block_char(framebuffer, 68, 5, 177, light_gray, 0);
+    font::draw_block_char(framebuffer, 67, 8, 178, light_gray, 0);
+    font::draw_block_char(framebuffer, 68, 8, 177, light_gray, 0);
+    font::draw_block_char(framebuffer, 67, 9, 219, white, 0);
+    font::draw_block_char(framebuffer, 68, 9, 219, white, 0);
+    // Bottom tip
+    font::draw_block_char(framebuffer, 66, 10, 219, white, 0);
+    font::draw_block_char(framebuffer, 67, 10, 219, white, 0);
+    font::draw_block_char(framebuffer, 72, 10, 176, light_gray, 0);
+    font::draw_block_char(framebuffer, 68, 11, 219, white, 0);
+    font::draw_block_char(framebuffer, 69, 11, 219, white, 0);
+    font::draw_block_char(framebuffer, 70, 11, 178, light_gray, 0);
+    font::draw_block_char(framebuffer, 71, 11, 177, light_gray, 0);
+
+    // Footer
+    font::draw_text(framebuffer, 25 * cell_w, 24 * cell_h, "Press any key to enter", white, 0);
+
+    // Drop the framebuffer lock so the interrupt handler can use it
+    drop(fb_guard);
+
+    serial_println!("[kernel] boot screen rendered to framebuffer");
+
+    // Wait for any key press
+    loop {
+        match zero::input::read_key() {
+            _ => break,
+        }
+    }
+
+    // After key press, clear the VGA text buffer. The WRITER's render method
+    // will also blit to the framebuffer, so the cleared screen appears on both.
+    // The shell then starts writing to VGA text buffer, and each render call
+    // updates the framebuffer via blit_to_framebuffer.
+    serial_println!("[kernel] key pressed, transitioning to shell");
+    zero::vga_buffer::clear_screen();
+}
+
+fn boot_screen_vga() {
     use zero::vga_buffer::{self, Color};
     use alloc::format;
-    serial_println!("[kernel] boot_screen starting");
+    use zero::println;
+
     vga_buffer::clear_screen();
 
     // Welcome message
@@ -149,14 +233,12 @@ fn boot_screen() {
     vga_buffer::write_at(0, 23, dots);
 
     // Stars
-    vga_buffer::set_color(Color::White, Color::Black);
     vga_buffer::put_at(5, 5, b'*');
     vga_buffer::put_at(40, 4, b'*');
     vga_buffer::put_at(70, 20, b'*');
     vga_buffer::put_at(30, 18, b'*');
 
-    // Clouds (using block characters and shading)
-    // Cloud 1
+    // Clouds
     vga_buffer::set_color(Color::DarkGray, Color::Black);
     for x in 10..25 { vga_buffer::put_at(x, 6, 219); }
     for x in 12..22 { vga_buffer::put_at(x, 5, 219); }
@@ -164,7 +246,6 @@ fn boot_screen() {
     vga_buffer::put_at(25, 6, 176);
     vga_buffer::put_at(9, 6, 176);
 
-    // Cloud 2
     vga_buffer::set_color(Color::DarkGray, Color::Black);
     for x in 50..65 { vga_buffer::put_at(x, 15, 219); }
     for x in 52..62 { vga_buffer::put_at(x, 14, 219); }
@@ -172,28 +253,27 @@ fn boot_screen() {
     vga_buffer::put_at(65, 15, 176);
     vga_buffer::put_at(49, 15, 176);
 
-    // Moon (C-shape with shading)
+    // Moon
     vga_buffer::set_color(Color::White, Color::Black);
-    // Top tip
-    vga_buffer::put_at(68, 3, 219); vga_buffer::put_at(69, 3, 219); vga_buffer::put_at(70, 3, 178); vga_buffer::put_at(71, 3, 177);
-    vga_buffer::put_at(66, 4, 219); vga_buffer::put_at(67, 4, 219); vga_buffer::put_at(72, 4, 176);
-    // Middle body
+    vga_buffer::put_at(68, 3, 219); vga_buffer::put_at(69, 3, 219);
+    vga_buffer::put_at(70, 3, 178); vga_buffer::put_at(71, 3, 177);
+    vga_buffer::put_at(66, 4, 219); vga_buffer::put_at(67, 4, 219);
+    vga_buffer::put_at(72, 4, 176);
     for y in 5..9 {
         vga_buffer::put_at(65, y, 219);
         vga_buffer::put_at(66, y, 219);
     }
-    // Shading on body
     vga_buffer::set_color(Color::LightGray, Color::Black);
     vga_buffer::put_at(67, 5, 178); vga_buffer::put_at(68, 5, 177);
     vga_buffer::put_at(67, 8, 178); vga_buffer::put_at(68, 8, 177);
     vga_buffer::put_at(67, 9, 219); vga_buffer::put_at(68, 9, 219);
     vga_buffer::set_color(Color::White, Color::Black);
-    // Bottom tip
-    vga_buffer::put_at(66, 10, 219); vga_buffer::put_at(67, 10, 219); vga_buffer::put_at(72, 10, 176);
-    vga_buffer::put_at(68, 11, 219); vga_buffer::put_at(69, 11, 219); vga_buffer::put_at(70, 11, 178); vga_buffer::put_at(71, 11, 177);
+    vga_buffer::put_at(66, 10, 219); vga_buffer::put_at(67, 10, 219);
+    vga_buffer::put_at(72, 10, 176);
+    vga_buffer::put_at(68, 11, 219); vga_buffer::put_at(69, 11, 219);
+    vga_buffer::put_at(70, 11, 178); vga_buffer::put_at(71, 11, 177);
 
     // Footer
-    vga_buffer::set_color(Color::White, Color::Black);
     vga_buffer::write_at(25, 24, "Press any key to enter");
 
     loop {

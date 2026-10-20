@@ -226,6 +226,66 @@ impl Writer {
         for row in 0..BUFFER_HEIGHT {
             self.render_row(row);
         }
+        self.blit_to_framebuffer();
+    }
+
+    /// Convert a VGA text-mode palette index (0-15) to a framebuffer u32 color.
+    fn vga_color_to_fb(index: u8) -> u32 {
+        const VGA_COLORS: [u32; 16] = [
+            0x000000, // Black
+            0x0000AA, // Blue
+            0x00AA00, // Green
+            0x00AAAA, // Cyan
+            0xAA0000, // Red
+            0xAA00AA, // Magenta
+            0xAA5500, // Brown
+            0xAAAAAA, // LightGray
+            0x555555, // DarkGray
+            0x5555FF, // LightBlue
+            0x55FF55, // LightGreen
+            0x55FFFF, // LightCyan
+            0xFF5555, // LightRed
+            0xFF55FF, // Pink
+            0xFFFF55, // Yellow
+            0xFFFFFF, // White
+        ];
+        VGA_COLORS[(index & 0x0F) as usize]
+    }
+
+    /// Copy the visible region of the logical VGA buffer onto the framebuffer,
+    /// (if one is active), so graphical QEMU output stays in sync with text-mode
+    /// writes from the shell.
+    pub fn blit_to_framebuffer(&mut self) {
+        let Some(fb_guard) = crate::graphics::framebuffer::FRAMEBUFFER.try_lock() else { return };
+        let Some(ref mut framebuffer) = *fb_guard else { return };
+
+        use crate::graphics::font;
+        use crate::graphics::display::Display;
+        let cell_w = font::CHAR_WIDTH + 2;
+        let cell_h = font::CHAR_HEIGHT + 2;
+
+        for row in 0..BUFFER_HEIGHT {
+            for col in 0..BUFFER_WIDTH {
+                let ch = self.logical_buffer.chars[row + self.scroll_offset][col];
+                let fg = vga_color_to_fb(ch.color_code.0 & 0x0F);
+                let bg = vga_color_to_fb((ch.color_code.0 >> 4) & 0x0F);
+                // Always draw background (even black) so the framebuffer is
+                // fully overwritten on clear.
+                let glyph = font::glyph(ch.ascii_character);
+                let px = col * cell_w;
+                let py = row * cell_h;
+                for gy in 0..font::CHAR_HEIGHT {
+                    let bits = glyph[gy];
+                    for gx in 0..font::CHAR_WIDTH {
+                        if (bits << gx) & 0x80 != 0 {
+                            framebuffer.put_pixel(px + gx, py + gy, fg);
+                        } else {
+                            framebuffer.put_pixel(px + gx, py + gy, bg);
+                        }
+                    }
+                }
+            }
+        }
     }
 
     fn new_line(&mut self) {
