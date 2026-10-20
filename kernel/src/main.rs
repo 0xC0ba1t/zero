@@ -7,6 +7,7 @@
 extern crate alloc;
 
 use bootloader_api::{BootInfo, entry_point, config::{BootloaderConfig, Mapping}};
+use zero::graphics::display::Display;
 use zero::println;
 use zero::serial_println;
 use core::panic::PanicInfo;

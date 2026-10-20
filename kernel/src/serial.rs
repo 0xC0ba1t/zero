@@ -1,7 +1,6 @@
 use lazy_static::lazy_static;
 use spin::Mutex;
 use uart_16550::SerialPort;
-use core::fmt::Write;
 use x86_64::instructions::port::Port;
 
 lazy_static! {
