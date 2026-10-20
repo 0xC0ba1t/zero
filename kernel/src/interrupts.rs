@@ -1,4 +1,4 @@
-use crate::println;
+use crate::fb_println;
 use crate::gdt;
 use crate::input::{self, Key};
 use crate::time;
@@ -76,7 +76,7 @@ pub fn init_idt() {
 extern "x86-interrupt" fn breakpoint_handler(
     stack_frame: InterruptStackFrame)
 {
-    println!("EXCEPTION: BREAKPOINT\n{:#?}", stack_frame);
+    fb_println!("EXCEPTION: BREAKPOINT\n{:#?}", stack_frame);
 }
 
 /// handles double fault exceptions
@@ -93,10 +93,10 @@ extern "x86-interrupt" fn page_fault_handler(
 ) {
     use x86_64::registers::control::Cr2;
 
-    println!("EXCEPTION: PAGE FAULT");
-    println!("Accessed Address: {:?}", Cr2::read());
-    println!("Error Code: {:?}", error_code);
-    println!("{:#?}", stack_frame);
+    fb_println!("EXCEPTION: PAGE FAULT");
+    fb_println!("Accessed Address: {:?}", Cr2::read());
+    fb_println!("Error Code: {:?}", error_code);
+    fb_println!("{:#?}", stack_frame);
     crate::hlt_loop_noirq();
 }
 

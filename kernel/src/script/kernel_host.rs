@@ -2,30 +2,24 @@
 
 use super::host::Host;
 use crate::input::{self, Key};
-use crate::vga_buffer::{self, Color};
-use crate::{println, time};
+use crate::{fb_println, time};
 
-/// Draws on the VGA text screen and reads the keyboard queue.
+/// Renders directly to the framebuffer and reads the keyboard queue.
 pub struct KernelHost {
-    saved_color: u8,
-    /// true once the script has drawn at a fixed position
-    graphics: bool,
+    saved_fg: u32,
+    saved_bg: u32,
 }
 
 impl KernelHost {
     pub fn new() -> KernelHost {
         input::take_interrupt();
+        let (fg, bg) = {
+            let console = crate::graphics::framebuffer::CONSOLE.lock();
+            (console.fg, console.bg)
+        };
         KernelHost {
-            saved_color: vga_buffer::color_code(),
-            graphics: false,
-        }
-    }
-
-    /// Hides the hardware cursor the first time a script draws something.
-    fn enter_graphics(&mut self) {
-        if !self.graphics {
-            self.graphics = true;
-            vga_buffer::set_cursor_visible(false);
+            saved_fg: fg,
+            saved_bg: bg,
         }
     }
 }
@@ -46,34 +40,39 @@ fn key_code(key: Key) -> i32 {
 impl Drop for KernelHost {
     /// Puts the screen back the way the shell expects it.
     fn drop(&mut self) {
-        vga_buffer::set_color_code(self.saved_color);
-        vga_buffer::set_cursor_visible(true);
+        let mut console = crate::graphics::framebuffer::CONSOLE.lock();
+        console.set_fg_bg(self.saved_fg, self.saved_bg);
+        console.clear();
         input::take_interrupt();
     }
 }
 
 impl Host for KernelHost {
     fn clear(&mut self) {
-        self.enter_graphics();
-        vga_buffer::clear_screen();
+        let mut console = crate::graphics::framebuffer::CONSOLE.lock();
+        console.clear();
     }
 
     fn print(&mut self, text: &str) {
-        println!("{}", text);
+        fb_println!("{}", text);
     }
 
     fn text(&mut self, x: i32, y: i32, text: &str) {
-        self.enter_graphics();
-        vga_buffer::write_at(x, y, text);
+        if x < 0 || y < 0 { return; }
+        let mut console = crate::graphics::framebuffer::CONSOLE.lock();
+        console.write_at(x as usize, y as usize, text);
     }
 
     fn plot(&mut self, x: i32, y: i32, ch: u8) {
-        self.enter_graphics();
-        vga_buffer::put_at(x, y, ch);
+        if x < 0 || y < 0 { return; }
+        let mut console = crate::graphics::framebuffer::CONSOLE.lock();
+        console.write_at(x as usize, y as usize, core::str::from_utf8(&[ch]).unwrap_or(" "));
     }
 
     fn set_color(&mut self, color: u8) {
-        vga_buffer::set_color(Color::from_index(color), Color::Black);
+        let mut console = crate::graphics::framebuffer::CONSOLE.lock();
+        let rgb = color_index_to_rgb(color);
+        console.set_fg_bg(rgb, 0x000000);
     }
 
     fn key(&mut self) -> i32 {
@@ -105,6 +104,28 @@ impl Host for KernelHost {
     }
 }
 
+fn color_index_to_rgb(index: u8) -> u32 {
+    const COLORS: [u32; 16] = [
+        0x000000, // Black
+        0x0000AA, // Blue
+        0x00AA00, // Green
+        0x00AAAA, // Cyan
+        0xAA0000, // Red
+        0xAA00AA, // Magenta
+        0xAA5500, // Brown
+        0xAAAAAA, // LightGray
+        0x555555, // DarkGray
+        0x5555FF, // LightBlue
+        0x55FF55, // LightGreen
+        0x55FFFF, // LightCyan
+        0xFF5555, // LightRed
+        0xFF55FF, // Pink
+        0xFFFF55, // Yellow
+        0xFFFFFF, // White
+    ];
+    COLORS[(index & 0x0F) as usize]
+}
+
 #[test_case]
 fn test_key_codes() {
     assert_eq!(key_code(Key::Char('q')), 113);
@@ -115,11 +136,14 @@ fn test_key_codes() {
 
 #[test_case]
 fn test_script_runs_on_the_kernel_host() {
-    let saved = vga_buffer::color_code();
+    let saved = {
+        let console = crate::graphics::framebuffer::CONSOLE.lock();
+        console.fg
+    };
     {
         let mut host = KernelHost::new();
         super::run("color 12\nprint 6 * 7", &mut host).unwrap();
     }
     // dropping the host restored the color the script had changed
-    assert_eq!(vga_buffer::color_code(), saved);
+    assert_eq!(crate::graphics::framebuffer::CONSOLE.lock().fg, saved);
 }

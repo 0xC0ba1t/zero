@@ -1,6 +1,6 @@
 //! Built-in shell commands.
 
-use crate::{print, println};
+use crate::{fb_print, fb_println};
 use alloc::string::String;
 use alloc::vec::Vec;
 
@@ -204,7 +204,7 @@ pub fn find(name: &str) -> Option<&'static Command> {
 }
 
 fn echo(args: &[String]) -> Result<(), CommandError> {
-    println!("{}", args.join(" "));
+    fb_println!("{}", args.join(" "));
     Ok(())
 }
 
@@ -221,14 +221,14 @@ fn help(args: &[String]) -> Result<(), CommandError> {
     match args {
         [] => {
             for command in COMMANDS {
-                println!("  {:<11}{}", command.name, command.about);
+                fb_println!("  {:<11}{}", command.name, command.about);
             }
             Ok(())
         }
         [name] => {
             let command = find(name).ok_or(CommandError::Failed("no such command"))?;
-            println!("usage: {}", command.usage);
-            println!("{}", command.about);
+            fb_println!("usage: {}", command.usage);
+            fb_println!("{}", command.about);
             Ok(())
         }
         _ => Err(CommandError::Usage),
@@ -237,49 +237,50 @@ fn help(args: &[String]) -> Result<(), CommandError> {
 
 fn clear(args: &[String]) -> Result<(), CommandError> {
     expect_no_args(args)?;
-    crate::vga_buffer::clear_screen();
+    crate::graphics::framebuffer::CONSOLE.lock().clear();
     Ok(())
 }
 
 fn version(args: &[String]) -> Result<(), CommandError> {
     expect_no_args(args)?;
-    println!("{} v{}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
+    fb_println!("{} v{}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
     Ok(())
 }
 
 fn uptime(args: &[String]) -> Result<(), CommandError> {
     expect_no_args(args)?;
     let (hours, minutes, seconds) = crate::time::split_hms(crate::time::uptime_secs());
-    println!("up {}h {:02}m {:02}s", hours, minutes, seconds);
+    fb_println!("up {}h {:02}m {:02}s", hours, minutes, seconds);
     Ok(())
 }
 
 fn mem(args: &[String]) -> Result<(), CommandError> {
     expect_no_args(args)?;
-    println!("heap: {} bytes total", crate::allocator::HEAP_SIZE);
-    println!("      {} bytes used", crate::allocator::heap_used());
-    println!("      {} bytes free", crate::allocator::heap_free());
+    fb_println!("heap: {} bytes total", crate::allocator::HEAP_SIZE);
+    fb_println!("      {} bytes used", crate::allocator::heap_used());
+    fb_println!("      {} bytes free", crate::allocator::heap_free());
     Ok(())
 }
 
 fn color(args: &[String]) -> Result<(), CommandError> {
-    use crate::vga_buffer::{self, Color};
-
     match args {
         [] => {
-            for (name, _) in Color::NAMES.iter() {
-                print!("{} ", name);
+            let names = [
+                "black", "blue", "green", "cyan", "red", "magenta",
+                "brown", "lightgray", "darkgray", "lightblue",
+                "lightgreen", "lightcyan", "lightred", "pink",
+                "yellow", "white",
+            ];
+            for name in &names {
+                fb_print!("{} ", name);
             }
-            println!();
+            fb_println!();
             Ok(())
         }
         [name] => {
-            let foreground =
-                Color::from_name(name).ok_or(CommandError::Failed("unknown color"))?;
-            if foreground == Color::Black {
-                return Err(CommandError::Failed("black on black would be invisible"));
-            }
-            vga_buffer::set_color(foreground, Color::Black);
+            let foreground = crate::graphics::framebuffer::CONSOLE.lock().color_from_name(name)
+                .ok_or(CommandError::Failed("unknown color"))?;
+            crate::graphics::framebuffer::CONSOLE.lock().set_fg_bg(foreground, 0x000000);
             Ok(())
         }
         _ => Err(CommandError::Usage),
@@ -299,20 +300,20 @@ fn crash(args: &[String]) -> Result<(), CommandError> {
 
 fn reboot(args: &[String]) -> Result<(), CommandError> {
     expect_no_args(args)?;
-    println!("rebooting...");
+    fb_println!("rebooting...");
     crate::power::reboot()
 }
 
 fn shutdown(args: &[String]) -> Result<(), CommandError> {
     expect_no_args(args)?;
-    println!("shutting down...");
+    fb_println!("shutting down...");
     crate::power::shutdown()
 }
 
 fn history(args: &[String]) -> Result<(), CommandError> {
     expect_no_args(args)?;
     for (index, line) in super::history::HISTORY.lock().iter().enumerate() {
-        println!("{:>3}  {}", index + 1, line);
+        fb_println!("{:>3}  {}", index + 1, line);
     }
     Ok(())
 }
@@ -323,7 +324,7 @@ fn run_script(source: &str) -> Result<(), CommandError> {
     match crate::script::run(source, &mut host) {
         Ok(()) => Ok(()),
         Err(error) => {
-            println!("script error: {}", error);
+            fb_println!("script error: {}", error);
             Err(CommandError::Reported)
         }
     }
@@ -342,7 +343,7 @@ fn run(args: &[String]) -> Result<(), CommandError> {
 fn programs(args: &[String]) -> Result<(), CommandError> {
     expect_no_args(args)?;
     for program in crate::script::programs::PROGRAMS {
-        println!("  {:<11}{}", program.name, program.about);
+        fb_println!("  {:<11}{}", program.name, program.about);
     }
     Ok(())
 }
@@ -369,7 +370,7 @@ fn src(args: &[String]) -> Result<(), CommandError> {
     let program = crate::script::programs::find(name)
         .ok_or(CommandError::Failed("no such program, see `programs`"))?;
     for line in program.source.lines() {
-        println!("{}", line);
+        fb_println!("{}", line);
     }
     Ok(())
 }
@@ -385,7 +386,7 @@ fn ls(args: &[String]) -> Result<(), CommandError> {
     let list = fs.list(path)
         .map_err(|_| CommandError::Failed("no such directory"))?;
     for item in list {
-        println!("{}", item);
+        fb_println!("{}", item);
     }
     Ok(())
 }
@@ -399,7 +400,7 @@ fn cat(args: &[String]) -> Result<(), CommandError> {
     let fs = fs.as_ref().ok_or(CommandError::Failed("fs not initialized"))?;
     let data = fs.read_file(path)
         .map_err(|_| CommandError::Failed("no such file"))?;
-    println!("{}", alloc::string::String::from_utf8_lossy(&data));
+    fb_println!("{}", alloc::string::String::from_utf8_lossy(&data));
     Ok(())
 }
 
@@ -449,7 +450,7 @@ fn pwd(args: &[String]) -> Result<(), CommandError> {
     expect_no_args(args)?;
     let fs = crate::fs::FILESYSTEM.lock();
     let fs = fs.as_ref().ok_or(CommandError::Failed("fs not initialized"))?;
-    println!("{}", fs.get_cwd());
+    fb_println!("{}", fs.get_cwd());
     Ok(())
 }
 
@@ -479,36 +480,31 @@ fn edit(args: &[String]) -> Result<(), CommandError> {
         fs.read_file(path).unwrap_or_default()
     };
 
-    // Fullscreen editor implementation
-    crate::vga_buffer::clear_screen();
+    let mut console = crate::graphics::framebuffer::CONSOLE.lock();
+    console.clear();
 
-    let mut lines: Vec<String> = alloc::string::String::from_utf8_lossy(&content)
+    let lines: Vec<String> = alloc::string::String::from_utf8_lossy(&content)
         .lines()
         .map(String::from)
         .collect();
+    let mut lines = lines;
     if lines.is_empty() { lines.push(String::new()); }
 
     let mut cursor_x = 0;
     let mut cursor_y = 0;
-    let _scroll_y = 0;
 
     loop {
-        // Redraw screen
-        crate::vga_buffer::clear_screen();
+        console.clear();
         for i in 0..25 {
-            if i < lines.len() {
-                let row_content = &lines[i];
-                crate::vga_buffer::write_at(0, i as i32, row_content);
+            if let Some(row_content) = lines.get(i) {
+                console.write_at(0, i, row_content);
             }
         }
-        // Force a render after updating the screen
-        crate::vga_buffer::WRITER.lock().render();
 
-        // Input loop
         let key = crate::input::read_key();
         match key {
             crate::input::Key::Char(c) => {
-                if c == '\u{1b}' { // ESC to quit/save menu
+                if c == '\u{1b}' { // ESC to quit/save
                     break;
                 } else if c == '\u{8}' {
                     if cursor_x > 0 {
@@ -533,7 +529,6 @@ fn edit(args: &[String]) -> Result<(), CommandError> {
         }
     }
 
-    // Simplified save logic for now
     let new_content = lines.join("\n").into_bytes();
     crate::fs::FILESYSTEM
         .lock()
@@ -542,7 +537,7 @@ fn edit(args: &[String]) -> Result<(), CommandError> {
         .write_file(path, new_content)
         .map_err(|_| CommandError::Failed("could not save file"))?;
 
-    crate::vga_buffer::clear_screen();
+    console.clear();
     Ok(())
 }
 

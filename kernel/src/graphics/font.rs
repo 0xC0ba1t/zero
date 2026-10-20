@@ -100,9 +100,10 @@ pub fn draw_char(display: &mut dyn crate::graphics::display::Display, x: usize, 
     for row in 0..CHAR_HEIGHT {
         let bits = glyph[row];
         for col in 0..CHAR_WIDTH {
-            if (bits << col) & 0x80 != 0 {
+            let mask = 0x80 >> col;
+            if bits & mask != 0 {
                 display.put_pixel(x + col, y + row, fg);
-            } else if bg != 0 {
+            } else {
                 display.put_pixel(x + col, y + row, bg);
             }
         }

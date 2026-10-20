@@ -7,8 +7,7 @@ mod parser;
 
 use alloc::string::String;
 use crate::input;
-use crate::vga_buffer;
-use crate::{print, println};
+use crate::{fb_print, fb_println};
 use commands::CommandError;
 use history::HISTORY;
 use line::{Edit, LineEditor};
@@ -17,25 +16,25 @@ const PROMPT: &str = "zero> ";
 
 /// Runs the shell forever: reads keys, edits the current line, and executes it on enter.
 pub fn run() -> ! {
-    println!(
+    fb_println!(
         "{} shell v{} - type `help` for a list of commands",
         env!("CARGO_PKG_NAME"),
         env!("CARGO_PKG_VERSION")
     );
 
     let mut editor = LineEditor::new();
-    print!("{}", PROMPT);
+    fb_print!("{}", PROMPT);
 
     loop {
         match editor.handle(input::read_key()) {
-            Edit::Inserted(c) => print!("{}", c),
-            Edit::Erased => print!("\u{8}"),
+            Edit::Inserted(c) => fb_print!("{}", c),
+            Edit::Erased => fb_print!("\u{8}"),
             Edit::Submitted => {
-                println!();
+                fb_println!();
                 let line = editor.take();
                 HISTORY.lock().push(&line);
                 execute(&line);
-                print!("{}", PROMPT);
+                fb_print!("{}", PROMPT);
             }
             Edit::Older => {
                 let entry = HISTORY.lock().older().map(String::from);
@@ -51,15 +50,15 @@ pub fn run() -> ! {
             }
             Edit::Complete => complete_line(&mut editor),
             Edit::Cancelled => {
-                println!("^C");
+                fb_println!("^C");
                 let _ = editor.take();
-                print!("{}", PROMPT);
+                fb_print!("{}", PROMPT);
             }
-            Edit::ScrollUp => crate::vga_buffer::scroll_up(),
-            Edit::ScrollDown => crate::vga_buffer::scroll_down(),
+            Edit::ScrollUp => crate::graphics::framebuffer::CONSOLE.lock().scroll_up(),
+            Edit::ScrollDown => crate::graphics::framebuffer::CONSOLE.lock().scroll_down(),
             Edit::ClearScreen => {
-                vga_buffer::clear_screen();
-                print!("{}{}", PROMPT, editor.as_str());
+                crate::graphics::framebuffer::CONSOLE.lock().clear();
+                fb_print!("{}{}", PROMPT, editor.as_str());
             }
             Edit::KillLine => replace_line(&mut editor, ""),
             Edit::Ignored => {}
@@ -89,7 +88,7 @@ pub fn execute(line: &str) -> Outcome {
     let args = match parser::parse(line) {
         Ok(args) => args,
         Err(error) => {
-            println!("parse error: {}", error);
+            fb_println!("parse error: {}", error);
             return Outcome::ParseError;
         }
     };
@@ -102,7 +101,7 @@ pub fn execute(line: &str) -> Outcome {
     let command = match commands::find(name) {
         Some(command) => command,
         None => {
-            println!("{}: command not found", name);
+            fb_println!("{}: command not found", name);
             return Outcome::NotFound;
         }
     };
@@ -110,11 +109,11 @@ pub fn execute(line: &str) -> Outcome {
     match (command.handler)(rest) {
         Ok(()) => Outcome::Success,
         Err(CommandError::Usage) => {
-            println!("usage: {}", command.usage);
+            fb_println!("usage: {}", command.usage);
             Outcome::Usage
         }
         Err(CommandError::Failed(reason)) => {
-            println!("{}: {}", command.name, reason);
+            fb_println!("{}: {}", command.name, reason);
             Outcome::Failed
         }
         Err(CommandError::Reported) => Outcome::Failed,
@@ -124,10 +123,10 @@ pub fn execute(line: &str) -> Outcome {
 /// Swaps the line being edited for `new`, both on screen and in the editor.
 fn replace_line(editor: &mut LineEditor, new: &str) {
     for _ in 0..editor.as_str().len() {
-        print!("\u{8}");
+        fb_print!("\u{8}");
     }
     editor.set(new);
-    print!("{}", editor.as_str());
+    fb_print!("{}", editor.as_str());
 }
 
 /// Completes the command name being typed, if it is unambiguous.
@@ -139,7 +138,7 @@ fn complete_line(editor: &mut LineEditor) {
     let typed = editor.as_str().len();
     for c in name[typed..].chars().chain(core::iter::once(' ')) {
         if editor.insert(c) {
-            print!("{}", c);
+            fb_print!("{}", c);
         }
     }
 }
