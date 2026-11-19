@@ -12,6 +12,7 @@
 use crate::graphics::display::Display;
 use crate::graphics::font::Font;
 use crate::graphics::framebuffer::{Framebuffer, FRAMEBUFFER};
+use crate::graphics::ui;
 use crate::graphics::vga::{self, BACKGROUND, PALETTE};
 use alloc::collections::VecDeque;
 use alloc::vec::Vec;
@@ -48,6 +49,11 @@ pub struct FbConsole {
     font: Font,
     cell_w: usize,
     cell_h: usize,
+    /// Left padding in pixels, top of the console window, its height, and where the first row starts.
+    pad_x: usize,
+    area_y: usize,
+    area_h: usize,
+    oy: usize,
     cols: usize,
     rows: usize,
     /// All lines, oldest first. The last `rows` of them are the live screen.
@@ -75,6 +81,10 @@ impl FbConsole {
             font: Font::console(),
             cell_w: 1,
             cell_h: 1,
+            pad_x: 0,
+            area_y: 0,
+            area_h: 0,
+            oy: 0,
             cols: 0,
             rows: 0,
             lines: VecDeque::new(),
@@ -96,11 +106,17 @@ impl FbConsole {
     /// Sizes the console to the framebuffer and clears the screen.
     pub fn init(&mut self) {
         if let Some(fb) = FRAMEBUFFER.lock().as_mut() {
-            self.font = Font::console_for_width(fb.info.width);
+            // the console lives in the window between the title bar and the status bar
+            let lay = ui::layout(fb.width(), fb.height());
+            self.font = Font::console_for_width(fb.width());
             self.cell_w = self.font.width();
             self.cell_h = self.font.height() + 2;
-            self.cols = (fb.info.width / self.cell_w).max(1);
-            self.rows = (fb.info.height / self.cell_h).max(1);
+            self.pad_x = 14.min(fb.width() / 20);
+            self.area_y = lay.body_y();
+            self.area_h = lay.body_h();
+            self.oy = self.area_y + 6;
+            self.cols = (fb.width().saturating_sub(2 * self.pad_x) / self.cell_w).max(1);
+            self.rows = (self.area_h.saturating_sub(6) / self.cell_h).max(1);
             self.initialized = true;
             self.clear_fb(fb);
             self.finish(fb);
@@ -258,7 +274,13 @@ impl FbConsole {
         self.view_back = 0;
         self.cursor_drawn = None;
         self.esc = Esc::None;
-        fb.clear_to(BACKGROUND);
+        self.clear_area(fb);
+    }
+
+    /// Paints the console's whole window area with the background color.
+    fn clear_area(&self, fb: &mut Framebuffer) {
+        let w = fb.width();
+        fb.fill_rect(0, self.area_y, w, self.area_h, BACKGROUND);
     }
 
     /// Paints one cell of the live screen.
@@ -270,13 +292,15 @@ impl FbConsole {
     fn paint(&self, fb: &mut Framebuffer, col: usize, row: usize, cell: Cell, inverse: bool) {
         let ch = cell as u8;
         let attr = (cell >> 8) as u8;
-        let (mut fg, mut bg) = (attr & 0x0F, attr >> 4);
+        let (fg, bg) = (attr & 0x0F, attr >> 4);
+        let (mut fg, mut bg) = (PALETTE[fg as usize], PALETTE[bg as usize]);
         if inverse {
-            core::mem::swap(&mut fg, &mut bg);
+            // the cursor: a block in the accent color
+            fg = BACKGROUND;
+            bg = ui::ACCENT;
         }
-        let (fg, bg) = (PALETTE[fg as usize], PALETTE[bg as usize]);
-        let x = col * self.cell_w;
-        let y = row * self.cell_h;
+        let x = self.pad_x + col * self.cell_w;
+        let y = self.oy + row * self.cell_h;
         match ch {
             0 | b' ' => fb.fill_rect(x, y, self.cell_w, self.cell_h, bg),
             0x21..=0x7E => {
@@ -291,7 +315,7 @@ impl FbConsole {
     /// Repaints the whole screen from the stored cells.
     fn redraw(&mut self, fb: &mut Framebuffer) {
         let first = self.lines.len() - self.rows - self.view_back;
-        fb.clear_to(BACKGROUND);
+        self.clear_area(fb);
         for r in 0..self.rows {
             let line = &self.lines[first + r];
             let last = match line.iter().rposition(|&c| c != BLANK) {
@@ -313,7 +337,7 @@ impl FbConsole {
         if self.lines.len() > MAX_LINES {
             self.lines.pop_front();
         }
-        fb.scroll_up(self.cell_h, BACKGROUND);
+        fb.scroll_rect_up(self.oy, self.rows * self.cell_h, self.cell_h, BACKGROUND);
     }
 
     fn newline(&mut self, fb: &mut Framebuffer) {

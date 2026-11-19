@@ -12,6 +12,7 @@ use crate::graphics::console::CONSOLE;
 use crate::graphics::display::Display;
 use crate::graphics::font::Font;
 use crate::graphics::framebuffer::{self, Framebuffer};
+use crate::graphics::ui;
 use crate::graphics::vga::{self, BACKGROUND, PALETTE};
 use crate::input::{self, Key};
 use crate::{fb_println, time};
@@ -26,6 +27,7 @@ type Cell = u16;
 const BLANK: Cell = b' ' as Cell | 7 << 8;
 
 pub struct KernelHost {
+    title: String,
     saved_attr: u8,
     /// The color scripts draw with (palette index).
     color: u8,
@@ -38,6 +40,9 @@ pub struct KernelHost {
     cell_h: usize,
     origin_x: usize,
     origin_y: usize,
+    /// The area between the title bar and the status bar, which `cls` may clear.
+    area_y: usize,
+    area_h: usize,
     font: Font,
 }
 
@@ -45,6 +50,7 @@ impl KernelHost {
     pub fn new() -> KernelHost {
         input::take_interrupt();
         KernelHost {
+            title: String::from("script"),
             saved_attr: CONSOLE.lock().attr(),
             color: 7,
             graphics: false,
@@ -54,8 +60,16 @@ impl KernelHost {
             cell_h: 1,
             origin_x: 0,
             origin_y: 0,
+            area_y: 0,
+            area_h: 0,
             font: Font::console(),
         }
+    }
+
+    /// Names the script in the title bar of the script screen.
+    pub fn with_title(mut self, title: &str) -> KernelHost {
+        self.title = String::from(title);
+        self
     }
 
     /// Takes over the screen for the cell grid (once).
@@ -64,13 +78,27 @@ impl KernelHost {
             return;
         }
         let mut geometry = None;
+        let title = self.title.clone();
         framebuffer::with(|fb| {
             let (w, h) = (fb.width(), fb.height());
-            geometry = Some((w / COLS, h / ROWS, (w % COLS) / 2, (h % ROWS) / 2));
+            let lay = ui::layout(w, h);
+            // Cells are twice as tall as wide, like VGA characters, so glyphs
+            // keep their proportions; the grid is centred between the bars.
+            let area_h = lay.body_h();
+            let cw = (w / COLS).min(area_h / (ROWS * 2)).max(1);
+            let ch = cw * 2;
+            let ox = (w.saturating_sub(COLS * cw)) / 2;
+            let oy = lay.body_y() + area_h.saturating_sub(ROWS * ch) / 2;
+            geometry = Some((cw, ch, ox, oy, lay.body_y(), area_h));
             fb.clear_to(BACKGROUND);
+            ui::draw_title(fb, &lay, &title, "ctrl+c to quit");
+            let info = alloc::format!("{}x{} cells of {}x{} px", COLS, ROWS, cw, ch);
+            ui::draw_status(fb, &lay, "script", &info);
             fb.flush();
         });
-        if let Some((cw, ch, ox, oy)) = geometry {
+        if let Some((cw, ch, ox, oy, area_y, area_h)) = geometry {
+            self.area_y = area_y;
+            self.area_h = area_h;
             self.cell_w = cw.max(1);
             self.cell_h = ch.max(1);
             self.origin_x = ox;
@@ -131,12 +159,9 @@ fn key_code(key: Key) -> i32 {
 impl Drop for KernelHost {
     /// Puts the screen back the way the shell expects it.
     fn drop(&mut self) {
-        {
-            let mut console = CONSOLE.lock();
-            console.set_attr(self.saved_attr);
-            if self.graphics {
-                console.restore();
-            }
+        CONSOLE.lock().set_attr(self.saved_attr);
+        if self.graphics {
+            ui::restore_shell_screen();
         }
         // whatever the script printed on its own screen goes to the shell
         for line in &self.printed {
@@ -152,8 +177,10 @@ impl Host for KernelHost {
         for cell in self.cells.iter_mut() {
             *cell = BLANK;
         }
+        let (area_y, area_h) = (self.area_y, self.area_h);
         framebuffer::with(|fb| {
-            fb.clear_to(BACKGROUND);
+            let w = fb.width();
+            fb.fill_rect(0, area_y, w, area_h, BACKGROUND);
             fb.flush();
         });
     }

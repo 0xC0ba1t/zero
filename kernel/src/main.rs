@@ -60,10 +60,10 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     });
     serial_println!("[kernel] interrupts unmasked");
 
-    // Boot screen, then wait for a key.
-    zero::graphics::framebuffer::with(bootscreen::draw);
-    let _ = zero::input::read_key();
-    CONSOLE.lock().clear();
+    // Boot screen (animated) until a key is pressed, then the shell window.
+    bootscreen::run();
+    CONSOLE.lock().init();
+    zero::graphics::ui::restore_shell_screen();
 
     #[cfg(test)]
     test_main();

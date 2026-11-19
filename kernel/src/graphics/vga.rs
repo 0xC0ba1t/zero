@@ -14,22 +14,22 @@ use crate::graphics::framebuffer::Framebuffer;
 
 /// The sixteen text colors, indexed like the VGA palette.
 pub const PALETTE: [u32; 16] = [
-    0x101018, // 0  black
-    0x2E5BD8, // 1  blue
-    0x2EA043, // 2  green
-    0x1FA9B3, // 3  cyan
-    0xD04040, // 4  red
-    0xA64DB8, // 5  magenta
-    0xB07A2A, // 6  brown
-    0xD0D0D8, // 7  light gray
-    0x6B6B78, // 8  dark gray
-    0x6A8DFF, // 9  light blue
-    0x5FE07A, // 10 light green
-    0x5FE8F0, // 11 light cyan
-    0xFF6B6B, // 12 light red
-    0xFF7ADF, // 13 pink
-    0xFFE45E, // 14 yellow
-    0xFFFFFF, // 15 white
+    0x282C34, // 0  black (the editor background)
+    0x5A93D4, // 1  blue
+    0x87A66B, // 2  green
+    0x5A99A4, // 3  cyan
+    0xB85D62, // 4  red
+    0x9A5FB3, // 5  magenta
+    0xBF956A, // 6  brown (orange)
+    0xDCE0E5, // 7  light gray (default text)
+    0x5D636F, // 8  dark gray (comments)
+    0x74ADE8, // 9  light blue (accent)
+    0xA1C181, // 10 light green
+    0x6EB4BF, // 11 light cyan
+    0xD07277, // 12 light red
+    0xB477CF, // 13 pink (purple)
+    0xDEC184, // 14 yellow
+    0xF1F3F6, // 15 white
 ];
 
 pub const BACKGROUND: u32 = PALETTE[0];
@@ -143,11 +143,17 @@ pub fn draw_cell(
 /// the font's glyph the glyph is stretched to fill the cell (the way a VGA
 /// character fills its cell) instead of floating in the middle of it.
 fn glyph(fb: &mut Framebuffer, x: usize, y: usize, w: usize, h: usize, c: char, fg: u32, bg: u32, font: &Font) {
-    if w * 4 > font.width() * 5 || h * 4 > font.height() * 5 {
-        fb.draw_alpha_scaled(x, y, w, h, font.raster(c), fg, bg);
+    let (fw, fh) = (font.width(), font.height());
+    if w * 4 > fw * 5 || h * 4 > fh * 5 {
+        // magnify evenly in both directions and centre, so letters keep their shape
+        let box_w = w.min(h * fw / fh);
+        let box_h = box_w * fh / fw;
+        let gx = x + (w - box_w) / 2;
+        let gy = y + (h - box_h) / 2;
+        fb.draw_alpha_scaled(gx, gy, box_w, box_h, font.raster(c), fg, bg);
     } else {
-        let gx = x + w.saturating_sub(font.width()) / 2;
-        let gy = y + h.saturating_sub(font.height()) / 2;
+        let gx = x + w.saturating_sub(fw) / 2;
+        let gy = y + h.saturating_sub(fh) / 2;
         font.draw_char(fb, gx, gy, c, fg, bg);
     }
 }

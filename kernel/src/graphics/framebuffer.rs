@@ -1,10 +1,15 @@
 //! The screen.
 //!
 //! Everything is drawn into a shadow buffer in ordinary RAM and copied to the
-//! real framebuffer in one go by [`Framebuffer::flush`]. Reading and writing
-//! video memory pixel by pixel is by far the slowest thing the kernel could
-//! do, so drawing code never touches it directly; only the rows that changed
-//! since the last flush are copied.
+//! real framebuffer by [`Framebuffer::flush`]. Reading and writing video
+//! memory pixel by pixel is by far the slowest thing the kernel could do, so
+//! drawing code never touches it directly; only the rows that changed since
+//! the last flush are copied.
+//!
+//! The shadow buffer has its own size, the *logical resolution*. When it is
+//! smaller than the physical screen, `flush` scales it up (nearest neighbour,
+//! aspect ratio kept, centred, black bars) so the resolution can be changed
+//! at any time without help from the firmware.
 
 use crate::graphics::display::Display;
 use alloc::vec;
@@ -20,13 +25,28 @@ pub fn with<R>(f: impl FnOnce(&mut Framebuffer) -> R) -> Option<R> {
 }
 
 pub struct Framebuffer {
+    /// The physical screen.
     pub info: FrameBufferInfo,
     front: &'static mut [u8],
     back: Vec<u8>,
     /// Bytes per pixel.
     bpp: usize,
-    /// Bytes per scan line.
+    /// Logical size: what all drawing code sees.
+    width: usize,
+    height: usize,
+    /// Bytes per scan line of the shadow buffer.
     pitch: usize,
+    /// Bytes per scan line of the real screen.
+    front_pitch: usize,
+    /// Logical to physical scale, 16.16 fixed point.
+    scale: u64,
+    /// Size and position of the scaled picture on the physical screen.
+    dest_w: usize,
+    dest_h: usize,
+    off_x: usize,
+    off_y: usize,
+    /// For each physical column of the picture, the logical column it shows.
+    x_map: Vec<u32>,
     /// Rows `dirty_lo..dirty_hi` differ between the shadow buffer and the screen.
     dirty_lo: usize,
     dirty_hi: usize,
@@ -35,19 +55,81 @@ pub struct Framebuffer {
 impl Framebuffer {
     pub fn new(info: FrameBufferInfo, buffer: &'static mut [u8]) -> Self {
         let bpp = info.bytes_per_pixel.max(1);
-        let pitch = info.stride * bpp;
-        let back = vec![0u8; buffer.len()];
         let mut fb = Framebuffer {
             info,
             front: buffer,
-            back,
+            back: Vec::new(),
             bpp,
-            pitch,
+            width: 0,
+            height: 0,
+            pitch: 0,
+            front_pitch: info.stride * bpp,
+            scale: 65536,
+            dest_w: 0,
+            dest_h: 0,
+            off_x: 0,
+            off_y: 0,
+            x_map: Vec::new(),
             dirty_lo: 0,
             dirty_hi: 0,
         };
-        fb.mark_dirty(0, info.height);
+        fb.configure(info.width, info.height);
         fb
+    }
+
+    /// Sets up the shadow buffer and the scaling for a logical size.
+    fn configure(&mut self, w: usize, h: usize) {
+        let (pw, ph) = (self.info.width, self.info.height);
+        self.width = w;
+        self.height = h;
+        self.pitch = w * self.bpp;
+        self.back = vec![0u8; self.pitch * h];
+        if w == pw && h == ph {
+            self.scale = 65536;
+            self.dest_w = w;
+            self.dest_h = h;
+            self.off_x = 0;
+            self.off_y = 0;
+            self.x_map = Vec::new();
+        } else {
+            let sx = pw as u64 * 65536 / w as u64;
+            let sy = ph as u64 * 65536 / h as u64;
+            self.scale = sx.min(sy);
+            self.dest_w = ((w as u64 * self.scale) >> 16).min(pw as u64) as usize;
+            self.dest_h = ((h as u64 * self.scale) >> 16).min(ph as u64) as usize;
+            self.off_x = (pw - self.dest_w) / 2;
+            self.off_y = (ph - self.dest_h) / 2;
+            let scale = self.scale;
+            self.x_map = (0..self.dest_w)
+                .map(|dx| (((dx as u64) << 16) / scale).min(w as u64 - 1) as u32)
+                .collect();
+        }
+        // black bars around the picture
+        self.front.fill(0);
+        self.dirty_lo = 0;
+        self.dirty_hi = 0;
+        self.mark_dirty(0, h);
+    }
+
+    /// Changes the logical resolution. It cannot be bigger than the physical
+    /// screen. Returns `false` (changing nothing) for an unusable size.
+    pub fn set_logical(&mut self, w: usize, h: usize) -> bool {
+        if w < 320 || h < 200 || w > self.info.width || h > self.info.height {
+            return false;
+        }
+        self.configure(w, h);
+        self.flush();
+        true
+    }
+
+    /// The physical screen size.
+    pub fn physical(&self) -> (usize, usize) {
+        (self.info.width, self.info.height)
+    }
+
+    /// How much the logical picture is magnified, in percent.
+    pub fn scale_percent(&self) -> usize {
+        ((self.scale * 100) >> 16) as usize
     }
 
     #[inline]
@@ -79,35 +161,110 @@ impl Framebuffer {
         if self.dirty_lo >= self.dirty_hi {
             return;
         }
-        let hi = self.dirty_hi.min(self.info.height);
-        let start = self.dirty_lo * self.pitch;
-        let end = (hi * self.pitch).min(self.front.len());
-        if start < end {
-            self.front[start..end].copy_from_slice(&self.back[start..end]);
-        }
+        let lo = self.dirty_lo;
+        let hi = self.dirty_hi.min(self.height);
         self.dirty_lo = 0;
         self.dirty_hi = 0;
+        let bpp = self.bpp;
+
+        if self.x_map.is_empty() {
+            // same size: one copy per row (the screen's rows may be padded)
+            for y in lo..hi {
+                let src = y * self.pitch;
+                let dst = y * self.front_pitch;
+                if dst + self.pitch <= self.front.len() {
+                    self.front[dst..dst + self.pitch].copy_from_slice(&self.back[src..src + self.pitch]);
+                }
+            }
+            return;
+        }
+
+        // scaled: every physical row picks the logical row it shows
+        let scale = self.scale;
+        let dy_lo = ((lo as u64 * scale) >> 16) as usize;
+        let dy_hi = (((hi as u64 * scale) + 65535) >> 16).min(self.dest_h as u64) as usize;
+        let row_bytes = self.dest_w * bpp;
+        let mut last_sy = usize::MAX;
+        let mut prev_dst = 0;
+        for dy in dy_lo..dy_hi {
+            let sy = ((((dy as u64) << 16) / scale) as usize).min(self.height - 1);
+            let dst = (dy + self.off_y) * self.front_pitch + self.off_x * bpp;
+            if dst + row_bytes > self.front.len() {
+                break;
+            }
+            if sy == last_sy {
+                // same source row as the row above: copy that row
+                self.front.copy_within(prev_dst..prev_dst + row_bytes, dst);
+            } else {
+                let src_row = &self.back[sy * self.pitch..(sy + 1) * self.pitch];
+                let out = &mut self.front[dst..dst + row_bytes];
+                match bpp {
+                    4 => {
+                        for (o, &mx) in out.chunks_exact_mut(4).zip(self.x_map.iter()) {
+                            let s = mx as usize * 4;
+                            o.copy_from_slice(&src_row[s..s + 4]);
+                        }
+                    }
+                    3 => {
+                        for (o, &mx) in out.chunks_exact_mut(3).zip(self.x_map.iter()) {
+                            let s = mx as usize * 3;
+                            o.copy_from_slice(&src_row[s..s + 3]);
+                        }
+                    }
+                    n => {
+                        for (o, &mx) in out.chunks_exact_mut(n).zip(self.x_map.iter()) {
+                            let s = mx as usize * n;
+                            o.copy_from_slice(&src_row[s..s + n]);
+                        }
+                    }
+                }
+                last_sy = sy;
+            }
+            prev_dst = dst;
+        }
     }
 
     /// Moves the picture up by `dy` rows and fills the rows that open up at
     /// the bottom with `fill`.
     pub fn scroll_up(&mut self, dy: usize, fill: u32) {
-        let h = self.info.height;
-        if dy == 0 {
+        let h = self.height;
+        self.scroll_rect_up(0, h, dy, fill);
+    }
+
+    /// Scrolls the full-width band of `h` rows starting at row `y` up by `dy` rows.
+    pub fn scroll_rect_up(&mut self, y: usize, h: usize, dy: usize, fill: u32) {
+        if dy == 0 || y >= self.height {
             return;
         }
+        let h = h.min(self.height - y);
         if dy >= h {
-            self.clear_to(fill);
+            let w = self.width;
+            self.fill_rect(0, y, w, h, fill);
             return;
         }
-        self.back.copy_within(dy * self.pitch..h * self.pitch, 0);
-        self.fill_rect(0, h - dy, self.info.width, dy, fill);
-        self.mark_dirty(0, h);
+        self.back.copy_within((y + dy) * self.pitch..(y + h) * self.pitch, y * self.pitch);
+        let w = self.width;
+        self.fill_rect(0, y + h - dy, w, dy, fill);
+        self.mark_dirty(y, y + h);
     }
 
     pub fn clear_to(&mut self, color: u32) {
-        let (w, h) = (self.info.width, self.info.height);
+        let (w, h) = (self.width, self.height);
         self.fill_rect(0, 0, w, h, color);
+    }
+
+    /// A copy of the picture as it is now (see [`Framebuffer::restore`]).
+    pub fn snapshot(&self) -> Vec<u8> {
+        self.back.clone()
+    }
+
+    /// Puts back a picture taken with [`Framebuffer::snapshot`].
+    pub fn restore(&mut self, snapshot: &[u8]) {
+        if snapshot.len() == self.back.len() {
+            self.back.copy_from_slice(snapshot);
+            let h = self.height;
+            self.mark_dirty(0, h);
+        }
     }
 
     /// Fills `w` pixels of one row starting at `(x, y)`.
@@ -138,10 +295,63 @@ impl Framebuffer {
         }
     }
 
+    /// Mixes `color` into the pixel at `(x, y)`; `alpha` 255 replaces it, 0 leaves it.
+    #[inline]
+    pub fn blend_pixel(&mut self, x: usize, y: usize, color: u32, alpha: u32) {
+        if x >= self.width || y >= self.height || alpha == 0 {
+            return;
+        }
+        let p = self.pack(color);
+        let n = self.bpp.min(4);
+        let off = y * self.pitch + x * self.bpp;
+        if off + n > self.back.len() {
+            return;
+        }
+        let d = &mut self.back[off..off + n];
+        if alpha >= 255 {
+            store(d, &p, n);
+        } else {
+            let ia = 255 - alpha;
+            for c in 0..n {
+                d[c] = ((p[c] as u32 * alpha + d[c] as u32 * ia) / 255) as u8;
+            }
+        }
+        self.mark_dirty(y, y + 1);
+    }
+
+    /// Draws `color` wherever `mask` (a `w` x `h` array, row by row) is non-zero.
+    /// The shape may hang over the edges of the screen.
+    pub fn blit_mask(&mut self, x: i32, y: i32, w: usize, h: usize, mask: &[u8], color: u32) {
+        let p = self.pack(color);
+        let n = self.bpp.min(4);
+        let (sw, sh) = (self.width as i32, self.height as i32);
+        let mut touched = false;
+        for ry in 0..h {
+            let yy = y + ry as i32;
+            if yy < 0 || yy >= sh {
+                continue;
+            }
+            let row = &mask[ry * w..(ry + 1) * w];
+            for (rx, &m) in row.iter().enumerate() {
+                let xx = x + rx as i32;
+                if m != 0 && xx >= 0 && xx < sw {
+                    let off = yy as usize * self.pitch + xx as usize * self.bpp;
+                    store(&mut self.back[off..off + n], &p, n);
+                }
+            }
+            touched = true;
+        }
+        if touched {
+            let lo = y.max(0) as usize;
+            let hi = ((y + h as i32).min(sh)).max(0) as usize;
+            self.mark_dirty(lo, hi);
+        }
+    }
+
     /// Draws one anti-aliased glyph: `alpha` rows give the coverage of the
     /// foreground color over the background color for each pixel.
     pub fn draw_alpha(&mut self, x: usize, y: usize, alpha: &[&[u8]], fg: u32, bg: u32) {
-        let (w, h) = (self.info.width, self.info.height);
+        let (w, h) = (self.width, self.height);
         let pfg = self.pack(fg);
         let pbg = self.pack(bg);
         let bpp = self.bpp;
@@ -161,9 +371,9 @@ impl Framebuffer {
             for (a, d) in row[..n].iter().zip(dst.chunks_exact_mut(bpp)) {
                 let a = *a as u32;
                 if a == 0 {
-                    d.copy_from_slice(&pbg[..bpp.min(4)]);
+                    store(d, &pbg, bpp.min(4));
                 } else if a == 255 {
-                    d.copy_from_slice(&pfg[..bpp.min(4)]);
+                    store(d, &pfg, bpp.min(4));
                 } else {
                     let ia = 255 - a;
                     for c in 0..bpp.min(4) {
@@ -176,28 +386,68 @@ impl Framebuffer {
             self.mark_dirty(y, y + rows);
         }
     }
+
+    /// Draws an anti-aliased glyph stretched to a `w` x `h` box, using
+    /// bilinear interpolation of its coverage.
+    pub fn draw_alpha_scaled(&mut self, x: usize, y: usize, w: usize, h: usize, alpha: &[&[u8]], fg: u32, bg: u32) {
+        let sh = alpha.len();
+        let sw = alpha.first().map_or(0, |row| row.len());
+        if sh == 0 || sw == 0 || w == 0 || h == 0 || x >= self.width || y >= self.height {
+            return;
+        }
+        let (pfg, pbg) = (self.pack(fg), self.pack(bg));
+        let bpp = self.bpp.min(4);
+        let wc = w.min(self.width - x);
+        let rows = h.min(self.height - y);
+        let max_x = ((sw - 1) * 256) as i32;
+        let max_y = ((sh - 1) * 256) as i32;
+        for dy in 0..rows {
+            // source row in 24.8 fixed point, sampled at the pixel centre
+            let fy = ((((2 * dy + 1) * sh * 128) / h) as i32 - 128).clamp(0, max_y);
+            let (y0, ty) = ((fy >> 8) as usize, (fy & 255) as u32);
+            let y1 = (y0 + 1).min(sh - 1);
+            let off = (y + dy) * self.pitch + x * self.bpp;
+            if off + wc * self.bpp > self.back.len() {
+                break;
+            }
+            for dx in 0..wc {
+                let fx = ((((2 * dx + 1) * sw * 128) / w) as i32 - 128).clamp(0, max_x);
+                let (x0, tx) = ((fx >> 8) as usize, (fx & 255) as u32);
+                let x1 = (x0 + 1).min(sw - 1);
+                let top = alpha[y0][x0] as u32 * (256 - tx) + alpha[y0][x1] as u32 * tx;
+                let bottom = alpha[y1][x0] as u32 * (256 - tx) + alpha[y1][x1] as u32 * tx;
+                let a = (top * (256 - ty) + bottom * ty) >> 16;
+                let ia = 255 - a;
+                let d = &mut self.back[off + dx * self.bpp..off + dx * self.bpp + bpp];
+                for c in 0..bpp {
+                    d[c] = ((pfg[c] as u32 * a + pbg[c] as u32 * ia) / 255) as u8;
+                }
+            }
+        }
+        self.mark_dirty(y, y + rows);
+    }
 }
 
 impl Display for Framebuffer {
     #[inline]
     fn put_pixel(&mut self, x: usize, y: usize, color: u32) {
-        if x < self.info.width && y < self.info.height {
+        if x < self.width && y < self.height {
             let px = self.pack(color);
             let off = y * self.pitch + x * self.bpp;
             let n = self.bpp.min(4);
             if off + n <= self.back.len() {
-                self.back[off..off + n].copy_from_slice(&px[..n]);
+                store(&mut self.back[off..off + n], &px, n);
                 self.mark_dirty(y, y + 1);
             }
         }
     }
 
     fn fill_rect(&mut self, x: usize, y: usize, w: usize, h: usize, color: u32) {
-        if x >= self.info.width || y >= self.info.height || w == 0 || h == 0 {
+        if x >= self.width || y >= self.height || w == 0 || h == 0 {
             return;
         }
-        let w = w.min(self.info.width - x);
-        let h = h.min(self.info.height - y);
+        let w = w.min(self.width - x);
+        let h = h.min(self.height - y);
         let px = self.pack(color);
         // paint the first row, then copy it down
         self.fill_span(x, y, w, px);
@@ -218,11 +468,11 @@ impl Display for Framebuffer {
     }
 
     fn width(&self) -> usize {
-        self.info.width
+        self.width
     }
 
     fn height(&self) -> usize {
-        self.info.height
+        self.height
     }
 
     fn present(&mut self) {
@@ -230,44 +480,27 @@ impl Display for Framebuffer {
     }
 }
 
-impl Framebuffer {
-    /// Draws an anti-aliased glyph stretched to fill a `w` x `h` box, using
-    /// bilinear interpolation of its coverage.
-    pub fn draw_alpha_scaled(&mut self, x: usize, y: usize, w: usize, h: usize, alpha: &[&[u8]], fg: u32, bg: u32) {
-        let sh = alpha.len();
-        let sw = alpha.first().map_or(0, |row| row.len());
-        if sh == 0 || sw == 0 || w == 0 || h == 0 || x >= self.info.width || y >= self.info.height {
-            return;
+/// Writes the first `n` bytes of a packed pixel. Plain byte stores: a
+/// `copy_from_slice` with a length only known at run time becomes a call to
+/// `memcpy`, which is far too slow to do once per pixel.
+#[inline(always)]
+fn store(d: &mut [u8], p: &[u8; 4], n: usize) {
+    match n {
+        4 => {
+            d[0] = p[0];
+            d[1] = p[1];
+            d[2] = p[2];
+            d[3] = p[3];
         }
-        let (pfg, pbg) = (self.pack(fg), self.pack(bg));
-        let bpp = self.bpp.min(4);
-        let w = w.min(self.info.width - x);
-        let rows = h.min(self.info.height - y);
-        let max_x = ((sw - 1) * 256) as i32;
-        let max_y = ((sh - 1) * 256) as i32;
-        for dy in 0..rows {
-            // source row in 24.8 fixed point, sampled at the pixel centre
-            let fy = ((((2 * dy + 1) * sh * 128) / h) as i32 - 128).clamp(0, max_y);
-            let (y0, ty) = ((fy >> 8) as usize, (fy & 255) as u32);
-            let y1 = (y0 + 1).min(sh - 1);
-            let off = (y + dy) * self.pitch + x * self.bpp;
-            if off + w * self.bpp > self.back.len() {
-                break;
-            }
-            for dx in 0..w {
-                let fx = ((((2 * dx + 1) * sw * 128) / w.max(1)) as i32 - 128).clamp(0, max_x);
-                let (x0, tx) = ((fx >> 8) as usize, (fx & 255) as u32);
-                let x1 = (x0 + 1).min(sw - 1);
-                let top = alpha[y0][x0] as u32 * (256 - tx) + alpha[y0][x1] as u32 * tx;
-                let bottom = alpha[y1][x0] as u32 * (256 - tx) + alpha[y1][x1] as u32 * tx;
-                let a = (top * (256 - ty) + bottom * ty) >> 16;
-                let ia = 255 - a;
-                let d = &mut self.back[off + dx * self.bpp..off + dx * self.bpp + bpp];
-                for c in 0..bpp {
-                    d[c] = ((pfg[c] as u32 * a + pbg[c] as u32 * ia) / 255) as u8;
-                }
+        3 => {
+            d[0] = p[0];
+            d[1] = p[1];
+            d[2] = p[2];
+        }
+        _ => {
+            for i in 0..n {
+                d[i] = p[i];
             }
         }
-        self.mark_dirty(y, y + rows);
     }
 }

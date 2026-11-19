@@ -3,11 +3,10 @@
 
 pub mod bootscreen;
 pub mod console;
-pub mod cube;
-pub mod demo;
+pub mod demo3d;
 pub mod display;
 pub mod font;
 pub mod framebuffer;
 pub mod math;
-pub mod rasterizer;
+pub mod ui;
 pub mod vga;

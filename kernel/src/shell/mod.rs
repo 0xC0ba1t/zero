@@ -8,6 +8,7 @@ mod parser;
 
 use crate::fs::FILESYSTEM;
 use crate::graphics::console::CONSOLE;
+use crate::graphics::ui;
 use crate::input;
 use crate::{fb_print, fb_println};
 use alloc::string::String;
@@ -36,7 +37,7 @@ fn show_prompt(editor: &mut LineEditor) -> Prompt {
         .as_ref()
         .map(|fs| fs.get_cwd())
         .unwrap_or_else(|| String::from("/"));
-    fb_print!("{}zero{}:{}{}{}> ", GREEN, RESET, BLUE, cwd, RESET);
+    fb_print!("{}{}{} {}>{} ", BLUE, cwd, RESET, GREEN, RESET);
     let (cols, _) = CONSOLE.lock().size();
     let (col, row) = CONSOLE.lock().pos();
     // keep the whole line on one screen row, so editing never has to scroll
@@ -52,6 +53,17 @@ fn redraw(editor: &LineEditor, prompt: &mut Prompt) {
         .lock()
         .redraw_input(prompt.col, prompt.row, text, wipe, editor.cursor());
     prompt.drawn = text.len();
+}
+
+/// Waits for the next key. While idle the status bar keeps its clock moving.
+fn next_key() -> input::Key {
+    loop {
+        if let Some(key) = input::try_read_key() {
+            return key;
+        }
+        ui::tick_status();
+        x86_64::instructions::hlt();
+    }
 }
 
 /// Runs the shell forever: reads keys, edits the current line, and executes it on enter.
@@ -70,13 +82,14 @@ pub fn run() -> ! {
     let mut prompt = show_prompt(&mut editor);
 
     loop {
-        match editor.handle(input::read_key()) {
+        match editor.handle(next_key()) {
             Edit::Changed => redraw(&editor, &mut prompt),
             Edit::Submitted => {
                 fb_println!();
                 let line = editor.take();
                 HISTORY.lock().push(&line);
                 execute(&line);
+                ui::refresh_status();
                 prompt = show_prompt(&mut editor);
             }
             Edit::Older => {

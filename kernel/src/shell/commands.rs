@@ -64,7 +64,9 @@ pub static COMMANDS: &[Command] = &[
     command!("uptime", "uptime", "show the time since boot", uptime),
     command!("mem", "mem", "show heap usage", mem),
     command!("screen", "screen", "show the display mode", screen),
+    command!("res", "res [<width>x<height> | native | half]", "show or change the screen resolution", res),
     command!("bench", "bench", "measure how fast the screen can be drawn", bench),
+    command!("3d", "3d [<demo> | tour]", "list or run the 3D demos", demos3d),
     command!("cube", "cube", "show a spinning 3D cube", cube_demo),
     command!("version", "version", "print the kernel name and version", version),
     command!("breakpoint", "breakpoint", "trigger a breakpoint exception", breakpoint),
@@ -107,6 +109,7 @@ fn with_fs<R>(f: impl FnOnce(&mut Filesystem) -> Result<R, FsError>) -> Result<R
 }
 
 const BLUE: &str = "\x1b[94m";
+const RED: &str = "\x1b[91m";
 const CYAN: &str = "\x1b[96m";
 const GRAY: &str = "\x1b[90m";
 const RESET: &str = "\x1b[0m";
@@ -198,15 +201,94 @@ fn history(args: &[String]) -> Result<(), CommandError> {
 
 fn screen(args: &[String]) -> Result<(), CommandError> {
     expect_no_args(args)?;
+    use crate::graphics::display::Display;
     let mode = crate::graphics::framebuffer::with(|fb| {
-        (fb.info.width, fb.info.height, fb.info.bytes_per_pixel * 8, fb.info.pixel_format)
+        (fb.physical(), (fb.width(), fb.height()), fb.info.bytes_per_pixel * 8, fb.info.pixel_format, fb.scale_percent())
     })
     .ok_or(CommandError::Failed("no framebuffer"))?;
     let (cols, rows) = CONSOLE.lock().size();
-    fb_println!("display  {}x{}, {} bits per pixel, {:?}", mode.0, mode.1, mode.2, mode.3);
+    fb_println!("screen   {}x{}, {} bits per pixel, {:?}", (mode.0).0, (mode.0).1, mode.2, mode.3);
+    fb_println!("drawing  {}x{} (scaled {}.{:02}x, see `res`)", (mode.1).0, (mode.1).1, mode.4 / 100, mode.4 % 100);
     fb_println!("console  {} columns x {} rows", cols, rows);
-    fb_println!("scripts  80x25 cell grid, {}x{} pixels per cell", mode.0 / 80, mode.1 / 25);
     Ok(())
+}
+
+/// Resolutions offered by `res`, when the screen is big enough for them.
+const PRESETS: [(usize, usize); 10] = [
+    (800, 450), (960, 540), (1024, 576), (1280, 720), (1600, 900),
+    (1920, 1080), (2560, 1440), (3200, 1800), (3840, 2160), (1024, 768),
+];
+
+/// Changes the resolution everything is drawn at. The picture is scaled up to
+/// the real screen (keeping its proportions), so a lower resolution means
+/// bigger text and chunkier pixels.
+fn res(args: &[String]) -> Result<(), CommandError> {
+    use crate::graphics::display::Display;
+    let ((pw, ph), (lw, lh)) = crate::graphics::framebuffer::with(|fb| (fb.physical(), (fb.width(), fb.height())))
+        .ok_or(CommandError::Failed("no framebuffer"))?;
+
+    let (w, h) = match args {
+        [] => {
+            fb_println!("current  {}x{} on a {}x{} screen", lw, lh, pw, ph);
+            fb_print!("presets ");
+            for &(w, h) in PRESETS.iter().filter(|&&(w, h)| w <= pw && h <= ph) {
+                fb_print!(" {}x{}", w, h);
+            }
+            fb_println!();
+            fb_println!("{}usage: res <width>x<height> | native | half{}", GRAY, RESET);
+            return Ok(());
+        }
+        [mode] => match mode.as_str() {
+            "native" | "max" => (pw, ph),
+            "half" => (pw / 2, ph / 2),
+            other => {
+                let mut parts = other.split('x');
+                match (parts.next().and_then(|s| s.parse::<usize>().ok()), parts.next().and_then(|s| s.parse::<usize>().ok()), parts.next()) {
+                    (Some(w), Some(h), None) => (w, h),
+                    _ => return Err(CommandError::Usage),
+                }
+            }
+        },
+        _ => return Err(CommandError::Usage),
+    };
+
+    if w > pw || h > ph {
+        fb_println!("{}res: {}x{} is bigger than the {}x{} screen{}", RED, w, h, pw, ph, RESET);
+        return Err(CommandError::Reported);
+    }
+    if !crate::graphics::framebuffer::with(|fb| fb.set_logical(w, h)).unwrap_or(false) {
+        fb_println!("{}res: {}x{} is too small (minimum 320x200){}", RED, w, h, RESET);
+        return Err(CommandError::Reported);
+    }
+    // the console has to lay itself out again for the new size
+    CONSOLE.lock().init();
+    crate::graphics::ui::restore_shell_screen();
+    fb_println!("resolution is now {}x{}", w, h);
+    Ok(())
+}
+
+/// Runs the 3D demos.
+fn demos3d(args: &[String]) -> Result<(), CommandError> {
+    use crate::graphics::demo3d;
+    match args {
+        [] => {
+            for demo in demo3d::DEMOS {
+                fb_println!("  {}{:<11}{}{}", CYAN, demo.name, RESET, demo.about);
+            }
+            fb_println!("{}  `3d <name>` runs one; n/p switch, arrows zoom, space pauses, q quits{}", GRAY, RESET);
+            Ok(())
+        }
+        [name] if name == "tour" => {
+            demo3d::run(0);
+            Ok(())
+        }
+        [name] => {
+            let index = demo3d::find(name).ok_or(CommandError::Failed("no such demo, see `3d`"))?;
+            demo3d::run(index);
+            Ok(())
+        }
+        _ => Err(CommandError::Usage),
+    }
 }
 
 /// Fills the whole screen repeatedly and reports the frame rate.
@@ -225,7 +307,7 @@ fn bench(args: &[String]) -> Result<(), CommandError> {
     })
     .ok_or(CommandError::Failed("no framebuffer"))?;
     let ms = (crate::time::uptime_ms() - start).max(1);
-    CONSOLE.lock().restore();
+    crate::graphics::ui::restore_shell_screen();
     let pixels = size.0 as u64 * size.1 as u64 * FRAMES;
     fb_println!(
         "{} full-screen frames at {}x{} in {} ms: {} fps, {} Mpixel/s",
@@ -236,10 +318,7 @@ fn bench(args: &[String]) -> Result<(), CommandError> {
 
 fn cube_demo(args: &[String]) -> Result<(), CommandError> {
     expect_no_args(args)?;
-    crate::graphics::framebuffer::with(crate::graphics::demo::run_demo)
-        .ok_or(CommandError::Failed("graphics not initialized"))?;
-    // The demo drew straight onto the screen; bring the console back.
-    CONSOLE.lock().restore();
+    crate::graphics::demo3d::run(0);
     Ok(())
 }
 
@@ -269,8 +348,8 @@ fn shutdown(args: &[String]) -> Result<(), CommandError> {
 // ----- scripts -----
 
 /// Runs script source on the real screen and keyboard, reporting errors.
-fn run_script(source: &str) -> Result<(), CommandError> {
-    let mut host = crate::script::kernel_host::KernelHost::new();
+fn run_script(title: &str, source: &str) -> Result<(), CommandError> {
+    let mut host = crate::script::kernel_host::KernelHost::new().with_title(title);
     match crate::script::run(source, &mut host) {
         Ok(()) => Ok(()),
         Err(error) => {
@@ -288,7 +367,7 @@ fn run(args: &[String]) -> Result<(), CommandError> {
     };
     let program = crate::script::programs::find(name)
         .ok_or(CommandError::Failed("no such program, see `programs`"))?;
-    run_script(program.source)
+    run_script(program.name, program.source)
 }
 
 fn programs(args: &[String]) -> Result<(), CommandError> {
@@ -303,14 +382,14 @@ fn exec(args: &[String]) -> Result<(), CommandError> {
     if args.is_empty() {
         return Err(CommandError::Usage);
     }
-    run_script(&args.join(" "))
+    run_script("exec", &args.join(" "))
 }
 
 fn eval(args: &[String]) -> Result<(), CommandError> {
     if args.is_empty() {
         return Err(CommandError::Usage);
     }
-    run_script(&format!("print {}", args.join(" ")))
+    run_script("eval", &format!("print {}", args.join(" ")))
 }
 
 fn src(args: &[String]) -> Result<(), CommandError> {
