@@ -132,14 +132,19 @@ pub fn read(lba: u64, buf: &mut [u8]) -> Result<(), DiskError> {
         return Err(DiskError::OutOfRange);
     }
     let mut data = Port::<u16>::new(DATA);
-    for (i, sector) in buf.chunks_exact_mut(SECTOR).enumerate() {
-        select(lba + i as u64, 1);
+    // up to 128 sectors per command; the drive must be idle before each one
+    for (k, chunk) in buf.chunks_mut(SECTOR * 128).enumerate() {
+        let n = chunk.len() / SECTOR;
+        wait_idle()?;
+        select(lba + (k * 128) as u64, n as u8);
         outb(COMMAND, 0x20); // READ SECTORS
-        wait_data()?;
-        for pair in sector.chunks_exact_mut(2) {
-            let word = unsafe { data.read() };
-            pair[0] = word as u8;
-            pair[1] = (word >> 8) as u8;
+        for sector in chunk.chunks_exact_mut(SECTOR) {
+            wait_data()?;
+            for pair in sector.chunks_exact_mut(2) {
+                let word = unsafe { data.read() };
+                pair[0] = word as u8;
+                pair[1] = (word >> 8) as u8;
+            }
         }
     }
     Ok(())
@@ -154,12 +159,21 @@ pub fn write(lba: u64, buf: &[u8]) -> Result<(), DiskError> {
         return Err(DiskError::OutOfRange);
     }
     let mut data = Port::<u16>::new(DATA);
-    for (i, sector) in buf.chunks_exact(SECTOR).enumerate() {
-        select(lba + i as u64, 1);
+    for (k, chunk) in buf.chunks(SECTOR * 128).enumerate() {
+        let n = chunk.len() / SECTOR;
+        wait_idle()?;
+        select(lba + (k * 128) as u64, n as u8);
         outb(COMMAND, 0x30); // WRITE SECTORS
-        wait_data()?;
-        for pair in sector.chunks_exact(2) {
-            unsafe { data.write(pair[0] as u16 | (pair[1] as u16) << 8) };
+        for sector in chunk.chunks_exact(SECTOR) {
+            wait_data()?;
+            for pair in sector.chunks_exact(2) {
+                unsafe { data.write(pair[0] as u16 | (pair[1] as u16) << 8) };
+            }
+        }
+        // the drive writes the last sector before it is ready again
+        let status = wait_idle()?;
+        if status & (STATUS_ERR | STATUS_DF) != 0 {
+            return Err(DiskError::Failed);
         }
     }
     // make sure it reached the platter

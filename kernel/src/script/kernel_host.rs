@@ -198,6 +198,7 @@ fn key_code(key: Key) -> i32 {
         Key::Home => 262,
         Key::End => 263,
         Key::Delete => 264,
+        Key::F(n) => 300 + n as i32,
     }
 }
 

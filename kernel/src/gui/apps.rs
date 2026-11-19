@@ -1,139 +1,158 @@
 //! The applications the desktop can start, and how each one runs.
 
-use super::draw::Icon;
-use super::{files, settings, widgets};
+use super::icons::Icon;
 use crate::sched::Context;
+use alloc::string::String;
 use alloc::sync::Arc;
 use core::sync::atomic::{AtomicBool, Ordering};
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum App {
-    Terminal,
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum AppId {
     Files,
-    Settings,
-    Monitor,
+    Terminal,
     Browser,
-    /// A built-in game or program, by name (see `script::programs`).
+    Media,
+    Notes,
+    Buddy,
+    Activity,
+    Settings,
+    About,
+    /// A built-in ZeroScript app, by name (`programs/gui/<name>.zs`).
     Game(&'static str),
+    /// A ZeroScript file from the file system (the path is the argument).
+    Script,
     Doom,
 }
 
 pub struct AppInfo {
-    pub app: App,
+    pub id: AppId,
     pub name: &'static str,
     pub icon: Icon,
-    /// Size of the window's contents at 1280 pixels of screen width.
     pub size: (i32, i32),
-    /// Only one window of this application at a time.
+    /// Only one window at a time.
     pub single: bool,
-    /// Closing the window only hides it (the program keeps its state).
+    /// Closing the window only hides it (the program keeps running).
     pub keep_alive: bool,
+    pub category: &'static str,
 }
 
-/// Everything in the dock, in order. A `None` entry draws a separator.
-pub const DOCK: &[Option<AppInfo>] = &[
-    Some(AppInfo { app: App::Terminal, name: "Terminal", icon: Icon::Terminal, size: (760, 450), single: true, keep_alive: true }),
-    Some(AppInfo { app: App::Files, name: "Files", icon: Icon::Files, size: (760, 480), single: false, keep_alive: false }),
-    Some(AppInfo { app: App::Settings, name: "Settings", icon: Icon::Settings, size: (720, 480), single: true, keep_alive: false }),
-    Some(AppInfo { app: App::Browser, name: "Browser", icon: Icon::Browser, size: (860, 540), single: false, keep_alive: false }),
-    Some(AppInfo { app: App::Monitor, name: "Activity", icon: Icon::Monitor, size: (560, 420), single: true, keep_alive: false }),
-    None,
-    Some(AppInfo { app: App::Game("snake"), name: "Snake", icon: Icon::Snake, size: (640, 400), single: true, keep_alive: false }),
-    Some(AppInfo { app: App::Game("pong"), name: "Pong", icon: Icon::Pong, size: (640, 400), single: true, keep_alive: false }),
-    Some(AppInfo { app: App::Game("invaders"), name: "Space Invaders", icon: Icon::Invaders, size: (640, 400), single: true, keep_alive: false }),
-    Some(AppInfo { app: App::Game("tictactoe"), name: "Tic Tac Toe", icon: Icon::TicTacToe, size: (640, 400), single: true, keep_alive: false }),
-    Some(AppInfo { app: App::Game("connect4"), name: "Connect Four", icon: Icon::Connect4, size: (640, 400), single: true, keep_alive: false }),
-    Some(AppInfo { app: App::Game("calculator"), name: "Calculator", icon: Icon::Calculator, size: (640, 400), single: true, keep_alive: false }),
-    Some(AppInfo { app: App::Game("bounce"), name: "Bounce", icon: Icon::Bounce, size: (640, 400), single: true, keep_alive: false }),
-    Some(AppInfo { app: App::Doom, name: "DOOM", icon: Icon::Doom, size: (960, 600), single: true, keep_alive: true }),
+const fn app(id: AppId, name: &'static str, icon: Icon, size: (i32, i32), single: bool, keep_alive: bool, category: &'static str) -> AppInfo {
+    AppInfo { id, name, icon, size, single, keep_alive, category }
+}
+
+pub const APPS: &[AppInfo] = &[
+    app(AppId::Files, "Files", Icon::Files, (820, 500), false, false, "System"),
+    app(AppId::Terminal, "Terminal", Icon::Terminal, (760, 460), true, true, "System"),
+    app(AppId::Browser, "Browser", Icon::Browser, (900, 560), false, false, "Internet"),
+    app(AppId::Media, "Media", Icon::Media, (760, 520), false, false, "Media"),
+    app(AppId::Notes, "Notes", Icon::Notes, (680, 480), false, false, "Productivity"),
+    app(AppId::Buddy, "Bit", Icon::Buddy, (460, 560), true, false, "System"),
+    app(AppId::Activity, "Activity", Icon::Activity, (620, 460), true, false, "System"),
+    app(AppId::Settings, "Settings", Icon::Settings, (800, 540), true, false, "System"),
+    app(AppId::About, "About zero", Icon::Settings, (420, 300), true, false, "System"),
+    app(AppId::Game("snake"), "Snake", Icon::Snake, (640, 520), true, false, "Games"),
+    app(AppId::Game("pong"), "Pong", Icon::Pong, (720, 480), true, false, "Games"),
+    app(AppId::Game("invaders"), "Space Invaders", Icon::Invaders, (640, 560), true, false, "Games"),
+    app(AppId::Game("tictactoe"), "Tic Tac Toe", Icon::TicTacToe, (480, 560), true, false, "Games"),
+    app(AppId::Game("connect4"), "Connect Four", Icon::Connect4, (620, 600), true, false, "Games"),
+    app(AppId::Game("calculator"), "Calculator", Icon::Calculator, (300, 460), true, false, "Productivity"),
+    app(AppId::Game("bounce"), "Bounce", Icon::Bounce, (640, 460), true, false, "Games"),
+    app(AppId::Script, "Script", Icon::Script, (640, 480), false, false, "Developer"),
+    app(AppId::Doom, "DOOM", Icon::Doom, (960, 600), true, true, "Games"),
 ];
 
-pub fn info(app: App) -> Option<&'static AppInfo> {
-    DOCK.iter().flatten().find(|i| i.app == app)
+/// What the dock shows on the left, always.
+pub const DOCK: &[AppId] = &[
+    AppId::Files,
+    AppId::Browser,
+    AppId::Terminal,
+    AppId::Media,
+    AppId::Notes,
+    AppId::Buddy,
+    AppId::Activity,
+    AppId::Settings,
+];
+
+pub fn info(id: AppId) -> &'static AppInfo {
+    APPS.iter().find(|i| i.id == id).unwrap_or(&APPS[0])
+}
+
+/// The app that opens a file, by its name.
+pub fn for_file(path: &str) -> AppId {
+    let lower = path.to_ascii_lowercase();
+    let ext = lower.rsplit('.').next().unwrap_or("");
+    match ext {
+        "png" | "bmp" | "gif" | "ppm" | "pgm" | "wav" | "zimg" => AppId::Media,
+        "zs" => AppId::Script,
+        _ => AppId::Notes,
+    }
+}
+
+pub fn file_icon(name: &str, is_dir: bool) -> Icon {
+    if is_dir {
+        return Icon::Folder;
+    }
+    let lower = name.to_ascii_lowercase();
+    match lower.rsplit('.').next().unwrap_or("") {
+        "png" | "bmp" | "ppm" | "pgm" | "zimg" => Icon::Image,
+        "gif" => Icon::Video,
+        "wav" => Icon::Audio,
+        "zs" => Icon::Code,
+        _ => Icon::Document,
+    }
 }
 
 /// Starts the program for a window. The returned flag is set when it ends.
-pub fn start(app: App, ctx: Arc<Context>) -> Arc<AtomicBool> {
+pub fn start(id: AppId, ctx: Arc<Context>, arg: Option<String>) -> Arc<AtomicBool> {
     let done = Arc::new(AtomicBool::new(false));
     let finished = done.clone();
-    let name = info(app).map(|i| i.name).unwrap_or("app");
-    let stack_kib = match app {
-        App::Doom => 4096,
-        App::Terminal => 1024,
+    *ctx.arg.lock() = arg;
+    let name = info(id).name;
+    let stack_kib = match id {
+        AppId::Doom => 4096,
+        AppId::Terminal => 1024,
+        AppId::Game(_) | AppId::Script => 1024,
         _ => 512,
     };
     crate::sched::spawn_with(name, stack_kib, Some(ctx), move || {
-        run(app);
+        run(id);
         finished.store(true, Ordering::SeqCst);
     });
     done
 }
 
-fn run(app: App) {
+fn run(id: AppId) {
     use crate::graphics::console::CONSOLE;
-    match app {
-        App::Terminal => {
+    match id {
+        AppId::Terminal => {
             if let Some(ctx) = crate::sched::context() {
                 ctx.terminal.store(true, Ordering::SeqCst);
+                *ctx.title.lock() = String::from("Terminal");
             }
             CONSOLE.lock().init();
             crate::shell::run();
         }
-        App::Files => widgets::run(&mut files::Files::new()),
-        App::Settings => widgets::run(&mut settings::Settings::new()),
-        App::Monitor => widgets::run(&mut settings::Monitor::new()),
-        App::Browser => widgets::run(&mut super::browser::Browser::new()),
-        App::Game(name) => run_game(name),
-        App::Doom => {
+        AppId::Files => super::ui::run(&mut super::files::Files::new(super::app_arg())),
+        AppId::Notes => super::ui::run(&mut super::files::Notes::new(super::app_arg())),
+        AppId::Settings => super::ui::run(&mut super::settings::Settings::new(super::app_arg())),
+        AppId::About => super::ui::run(&mut super::settings::About::new()),
+        AppId::Activity => super::ui::run(&mut super::settings::Activity::new()),
+        AppId::Browser => super::ui::run(&mut super::browser::Browser::new(super::app_arg())),
+        AppId::Media => super::ui::run(&mut super::media::Media::new(super::app_arg())),
+        AppId::Buddy => super::ui::run(&mut super::buddy_desk::Chat::new()),
+        AppId::Game(name) => super::zsapp::run_builtin(name),
+        AppId::Script => {
+            let path = super::app_arg().unwrap_or_default();
+            super::zsapp::run_file(&path);
+        }
+        AppId::Doom => {
             if let Some(ctx) = crate::sched::context() {
                 ctx.raw_mouse.store(true, Ordering::SeqCst);
+                *ctx.title.lock() = String::from("DOOM");
             }
             if let Err(message) = crate::doom::run() {
-                show_error("DOOM", &message);
+                super::zsapp::show_error("DOOM", &message);
             }
         }
-    }
-}
-
-fn run_game(name: &str) {
-    let Some(entry) = crate::script::programs::find(name) else {
-        show_error(name, "no such program");
-        return;
-    };
-    let mut host = crate::script::kernel_host::KernelHost::new().with_title(name).standalone();
-    if let Err(error) = crate::script::run(entry.source, &mut host) {
-        drop(host);
-        let mut text = alloc::format!("{}", error);
-        text.insert_str(0, "error: ");
-        show_error(name, &text);
-    }
-}
-
-/// Shows an error in the window until it is closed.
-fn show_error(title: &str, message: &str) {
-    use super::draw;
-    let Some(ctx) = crate::sched::context() else { return };
-    let font = draw::font(16, false);
-    let mut drawn = false;
-    while !ctx.is_closed() {
-        if !drawn {
-            crate::graphics::framebuffer::with(|fb| {
-                use crate::graphics::display::Display;
-                let (w, h) = (fb.width() as i32, fb.height() as i32);
-                draw::rect(fb, 0, 0, w, h, draw::BG);
-                draw::text(fb, &draw::font(20, true), 20, 20, title, draw::RED);
-                let max = ((w - 40) / font.width() as i32).max(10) as usize;
-                let mut y = 56;
-                let chars: alloc::vec::Vec<char> = message.chars().collect();
-                for line in chars.chunks(max) {
-                    let s: alloc::string::String = line.iter().collect();
-                    draw::text(fb, &font, 20, y, &s, draw::TEXT);
-                    y += font.height() as i32 + 4;
-                }
-            });
-            drawn = true;
-        }
-        while ctx.events.lock().pop_front().is_some() {}
-        crate::sched::yield_idle();
     }
 }

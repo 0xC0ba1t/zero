@@ -710,6 +710,67 @@ impl Framebuffer {
         self.clip
     }
 
+    /// A 32-bit window surface (bytes B, G, R, X: each pixel is 0x00RRGGBB).
+    pub fn offscreen32(like: &Framebuffer, w: usize, h: usize) -> Framebuffer {
+        let mut info = like.info;
+        info.width = w.max(1);
+        info.height = h.max(1);
+        info.stride = w.max(1);
+        info.bytes_per_pixel = 4;
+        info.pixel_format = PixelFormat::Bgr;
+        info.byte_len = info.width * info.height * 4;
+        Framebuffer::new(info, &mut [])
+    }
+
+    /// The pixels as 32-bit words (only for 4-byte surfaces).
+    pub fn pixels32(&mut self) -> &mut [u32] {
+        let n = self.back.len() / 4;
+        let p = self.back.as_mut_ptr();
+        assert!(self.bpp == 4 && p as usize % 4 == 0, "not a 32-bit surface");
+        unsafe { core::slice::from_raw_parts_mut(p as *mut u32, n) }
+    }
+
+    pub fn pixels32_ref(&self) -> &[u32] {
+        let n = self.back.len() / 4;
+        unsafe { core::slice::from_raw_parts(self.back.as_ptr() as *const u32, n) }
+    }
+
+    /// Copies a rectangle of 0x00RRGGBB pixels (from a buffer the size of the
+    /// screen) into the shadow buffer, converting to the screen's format.
+    pub fn put32_rect(&mut self, src: &[u32], x0: usize, y0: usize, x1: usize, y1: usize) {
+        let (x1, y1) = (x1.min(self.width), y1.min(self.height));
+        if x1 <= x0 || y1 <= y0 {
+            return;
+        }
+        let bpp = self.bpp;
+        let rgb = self.info.pixel_format == PixelFormat::Rgb;
+        for y in y0..y1 {
+            let s = &src[y * self.width + x0..y * self.width + x1];
+            let d0 = y * self.pitch + x0 * bpp;
+            let d = &mut self.back[d0..d0 + (x1 - x0) * bpp];
+            if bpp == 4 && !rgb {
+                let dst = unsafe { core::slice::from_raw_parts_mut(d.as_mut_ptr() as *mut u32, x1 - x0) };
+                if d.as_ptr() as usize % 4 == 0 {
+                    dst.copy_from_slice(s);
+                    continue;
+                }
+            }
+            for (px, &c) in d.chunks_exact_mut(bpp).zip(s.iter()) {
+                let (r, g, b) = ((c >> 16) as u8, (c >> 8) as u8, c as u8);
+                if rgb {
+                    px[0] = r;
+                    px[1] = g;
+                    px[2] = b;
+                } else {
+                    px[0] = b;
+                    px[1] = g;
+                    px[2] = r;
+                }
+            }
+        }
+        self.mark_dirty(y0, y1);
+    }
+
     pub fn version(&self) -> u64 {
         self.version
     }

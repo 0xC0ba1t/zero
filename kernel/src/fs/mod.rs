@@ -180,6 +180,52 @@ impl Filesystem {
         dir.remove(&name).map(|_| ()).ok_or(FsError::NotFound)
     }
 
+    /// Moves or renames a file or folder.
+    pub fn rename(&mut self, from: &str, to: &str) -> Result<(), FsError> {
+        let fc = components(&self.cwd, from);
+        let tc = components(&self.cwd, to);
+        if fc.is_empty() || (tc.len() >= fc.len() && tc[..fc.len()] == fc[..]) {
+            return Err(FsError::InvalidPath);
+        }
+        {
+            let (dir, name) = self.parent_mut(to)?;
+            if dir.contains_key(&name) {
+                return Err(FsError::AlreadyExists);
+            }
+        }
+        self.dirty = true;
+        let node = {
+            let (dir, name) = self.parent_mut(from)?;
+            dir.remove(&name).ok_or(FsError::NotFound)?
+        };
+        let (dir, name) = self.parent_mut(to)?;
+        dir.insert(name, node);
+        Ok(())
+    }
+
+    /// Copies a file or a whole folder.
+    pub fn copy(&mut self, from: &str, to: &str) -> Result<(), FsError> {
+        let node = self.node(&components(&self.cwd, from))?.clone();
+        let (dir, name) = self.parent_mut(to)?;
+        if dir.contains_key(&name) {
+            return Err(FsError::AlreadyExists);
+        }
+        dir.insert(name, node);
+        self.dirty = true;
+        Ok(())
+    }
+
+    /// Bytes used by a file or everything in a folder.
+    pub fn size_of(&self, path: &str) -> usize {
+        fn walk(n: &Node) -> usize {
+            match n {
+                Node::File(d) => d.len(),
+                Node::Directory(m) => m.values().map(walk).sum(),
+            }
+        }
+        self.node(&components(&self.cwd, path)).map(walk).unwrap_or(0)
+    }
+
     /// Names in a directory, sorted.
     pub fn list(&self, path: &str) -> Result<Vec<String>, FsError> {
         match self.node(&components(&self.cwd, path))? {
@@ -200,6 +246,10 @@ impl Filesystem {
                 .collect()),
             Node::File(_) => Err(FsError::NotADirectory),
         }
+    }
+
+    pub fn mark_dirty(&mut self) {
+        self.dirty = true;
     }
 
     /// Whether anything changed since the last call; clears the flag.

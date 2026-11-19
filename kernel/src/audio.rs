@@ -215,6 +215,20 @@ fn mix(out: *mut i16, frames: usize) {
         Some(f) => f(out, frames),
         None => buffer.fill(0),
     }
+    if let Some(mut st) = STREAM.try_lock() {
+        if let Some(st) = st.as_mut() {
+            if st.playing {
+                let n = buffer.len().min(st.data.len().saturating_sub(st.pos));
+                for (d, s) in buffer[..n].iter_mut().zip(&st.data[st.pos..st.pos + n]) {
+                    *d = (*d as i32 + *s as i32).clamp(-32768, 32767) as i16;
+                }
+                st.pos += n;
+                if st.pos >= st.data.len() {
+                    st.playing = false;
+                }
+            }
+        }
+    }
     if let Some(mut voices) = VOICES.try_lock() {
         for voice in voices.iter_mut().filter(|v| v.active) {
             voice.render(buffer);
@@ -227,6 +241,47 @@ fn mix(out: *mut i16, frames: usize) {
         let v = (*s as i32 * gain) / 100;
         *s = v.clamp(-32768, 32767) as i16;
     }
+}
+
+// ---------------------------------------------------------------- streams
+
+/// A recording being played (48 kHz stereo samples).
+pub struct Stream {
+    pub data: alloc::sync::Arc<alloc::vec::Vec<i16>>,
+    pub pos: usize,
+    pub playing: bool,
+}
+
+pub static STREAM: Mutex<Option<Stream>> = Mutex::new(None);
+
+pub fn play_stream(data: alloc::sync::Arc<alloc::vec::Vec<i16>>) {
+    start();
+    x86_64::instructions::interrupts::without_interrupts(|| *STREAM.lock() = Some(Stream { data, pos: 0, playing: true }));
+}
+
+/// (position, length) in samples, and whether it plays.
+pub fn stream_state() -> Option<(usize, usize, bool)> {
+    x86_64::instructions::interrupts::without_interrupts(|| STREAM.lock().as_ref().map(|s| (s.pos, s.data.len(), s.playing)))
+}
+
+pub fn stream_set(pos: Option<usize>, playing: Option<bool>) {
+    x86_64::instructions::interrupts::without_interrupts(|| {
+        if let Some(s) = STREAM.lock().as_mut() {
+            if let Some(p) = pos {
+                s.pos = p.min(s.data.len()) & !1;
+            }
+            if let Some(pl) = playing {
+                s.playing = pl;
+                if pl && s.pos >= s.data.len() {
+                    s.pos = 0;
+                }
+            }
+        }
+    });
+}
+
+pub fn stream_stop() {
+    x86_64::instructions::interrupts::without_interrupts(|| *STREAM.lock() = None);
 }
 
 // ---------------------------------------------------------------- effects

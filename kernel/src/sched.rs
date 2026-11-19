@@ -68,6 +68,16 @@ pub struct Context {
     pub resized: AtomicBool,
     /// The window holds the shell (its text console re-lays itself out on resize).
     pub terminal: AtomicBool,
+    /// Title shown by the desktop.
+    pub title: Mutex<alloc::string::String>,
+    /// Mouse pointer shape the app wants (see `gui::Cursor`).
+    pub cursor: core::sync::atomic::AtomicU8,
+    /// The app's menus for the menu bar: (name, item labels; "-" separates).
+    pub menus: Mutex<Vec<(alloc::string::String, Vec<alloc::string::String>)>>,
+    /// What the app was started with (a file to open).
+    pub arg: Mutex<Option<alloc::string::String>>,
+    /// The app asks for a new content size.
+    pub want_size: Mutex<Option<(usize, usize)>>,
 }
 
 impl Context {
@@ -81,6 +91,11 @@ impl Context {
             raw_mouse: AtomicBool::new(false),
             resized: AtomicBool::new(false),
             terminal: AtomicBool::new(false),
+            title: Mutex::new(alloc::string::String::new()),
+            cursor: core::sync::atomic::AtomicU8::new(0),
+            menus: Mutex::new(Vec::new()),
+            arg: Mutex::new(None),
+            want_size: Mutex::new(None),
         })
     }
 

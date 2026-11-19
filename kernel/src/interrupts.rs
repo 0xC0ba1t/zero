@@ -177,6 +177,17 @@ extern "x86-interrupt" fn keyboard_interrupt_handler(
                 DecodedKey::RawKey(KeyCode::Home) => input::push_key(Key::Home),
                 DecodedKey::RawKey(KeyCode::End) => input::push_key(Key::End),
                 DecodedKey::RawKey(KeyCode::Delete) => input::push_key(Key::Delete),
+                DecodedKey::RawKey(code) => {
+                    use KeyCode as K;
+                    let f = match code {
+                        K::F1 => 1, K::F2 => 2, K::F3 => 3, K::F4 => 4, K::F5 => 5, K::F6 => 6,
+                        K::F7 => 7, K::F8 => 8, K::F9 => 9, K::F10 => 10, K::F11 => 11, K::F12 => 12,
+                        _ => 0,
+                    };
+                    if f > 0 {
+                        input::push_key(Key::F(f));
+                    }
+                }
                 DecodedKey::RawKey(_) => {}
             }
         }

@@ -31,6 +31,8 @@ pub enum Key {
     End,
     /// Delete (forward delete).
     Delete,
+    /// A function key, F1 to F12.
+    F(u8),
 }
 
 /// A fixed-capacity FIFO queue of keys, backed by a plain array.
@@ -97,6 +99,7 @@ static INPUT: Mutex<RingBuffer<QUEUE_SIZE>> = Mutex::new(RingBuffer::new());
 /// interrupts disabled.
 pub fn push_key(key: Key) {
     let _ = INPUT.lock().push(key);
+    push_gui_key(key);
 }
 
 /// Blocks until a key is available and returns it.
@@ -127,7 +130,7 @@ pub fn try_read_key() -> Option<Key> {
         loop {
             let event = ctx.events.lock().pop_front()?;
             match event {
-                crate::gui::Event::Key(key) => return Some(key),
+                crate::gui::Event::Key(key, _) => return Some(key),
                 crate::gui::Event::Resize { .. } => crate::gui::note_resize(),
                 _ => {}
             }
@@ -422,4 +425,62 @@ pub fn held(code: pc_keyboard::KeyCode) -> bool {
     } else {
         false
     }
+}
+
+// ---- keys with modifiers, for the desktop -----------------------------------
+
+static GUI_KEYS: Mutex<RingBuffer2> = Mutex::new(RingBuffer2 { items: [(Key::Home, 0); 128], head: 0, len: 0 });
+
+struct RingBuffer2 {
+    items: [(Key, u8); 128],
+    head: usize,
+    len: usize,
+}
+
+/// The modifier keys held right now: shift 1, ctrl 2, alt 4, super 8.
+pub fn modifiers() -> u8 {
+    use pc_keyboard::KeyCode as K;
+    let mut m = 0;
+    if held(K::LShift) || held(K::RShift) {
+        m |= 1;
+    }
+    if held(K::LControl) || held(K::RControl) {
+        m |= 2;
+    }
+    if held(K::LAlt) || held(K::RAltGr) {
+        m |= 4;
+    }
+    if held(K::LWin) || held(K::RWin) {
+        m |= 8;
+    }
+    m
+}
+
+/// Called by the keyboard interrupt: remembers the key with the modifiers held at that moment.
+pub fn push_gui_key(key: Key) {
+    let m = modifiers();
+    let mut q = GUI_KEYS.lock();
+    if q.len < 128 {
+        let i = (q.head + q.len) % 128;
+        q.items[i] = (key, m);
+        q.len += 1;
+    }
+}
+
+pub fn pop_gui_key() -> Option<(Key, u8)> {
+    interrupts::without_interrupts(|| {
+        let mut q = GUI_KEYS.lock();
+        if q.len == 0 {
+            return None;
+        }
+        let item = q.items[q.head];
+        q.head = (q.head + 1) % 128;
+        q.len -= 1;
+        Some(item)
+    })
+}
+
+/// Forgets keys for the desktop (when it starts).
+pub fn clear_gui_keys() {
+    interrupts::without_interrupts(|| GUI_KEYS.lock().len = 0);
 }

@@ -35,6 +35,8 @@ pub mod graphics;
 pub mod onboard;
 pub mod sched;
 pub mod audio;
+pub mod codecs;
+pub mod zs;
 pub mod pci;
 pub mod net;
 pub mod smp;

@@ -72,7 +72,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // Boot screen (animated) until a key is pressed, then the shell window.
     bootscreen::run();
     // First time on this disk: the welcome tour.
-    if zero::partition::present() && !zero::onboard::seen() {
+    let desktop = zero::settings::get_or("desktop", "on") != "off";
+    if zero::partition::present() && !zero::onboard::seen() && !desktop {
         zero::onboard::run();
     }
     // The desktop, unless the user chose the plain text shell.
