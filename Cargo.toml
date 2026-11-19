@@ -10,12 +10,20 @@ edition = "2021"
 [build-dependencies]
 zero = { path = "kernel", artifact = "bin", target = "x86_64-zero.json" }
 bootloader = "0.11"
+bootloader-boot-config = "0.11"
 
 [lib]
 path = "src/lib.rs"
 
 [profile.dev]
 panic = "abort"
+# The kernel does real work per frame (pixel pushing, glyph blending). Unoptimized
+# code is an order of magnitude slower, so even debug builds are optimized.
+opt-level = 2
 
 [profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+
 panic = "abort"

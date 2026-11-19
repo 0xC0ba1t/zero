@@ -75,7 +75,10 @@ unsafe impl FrameAllocator<Size4KiB> for EmptyFrameAllocator {
 
 pub struct BootInfoFrameAllocator {
     memory_map: &'static MemoryRegions,
-    next: usize,
+    /// Index of the region currently being handed out.
+    region: usize,
+    /// Physical address of the next free frame in that region.
+    next_addr: u64,
 }
 
 impl BootInfoFrameAllocator {
@@ -84,35 +87,31 @@ impl BootInfoFrameAllocator {
     /// This function is unsafe because the caller must guarantee that the passed
     /// memory map is valid. The main requirement is that all frames that are marked
     /// as `USABLE` in it are really unused.
-    
     pub unsafe fn init(memory_map: &'static MemoryRegions) -> Self {
         BootInfoFrameAllocator {
             memory_map,
-            next: 0,
+            region: 0,
+            next_addr: 0,
         }
-    }
-
-    /// Returns an iterator over the usable frames specified in the memory map.
-    
-    fn usable_frames(&self) -> impl Iterator<Item = PhysFrame> {
-        // get usable regions from memory map
-        let regions = self.memory_map.iter();
-        let usable_regions = regions
-            .filter(|r| r.kind == MemoryRegionKind::Usable);
-        // map each region to its address range (as u64 for stepping)
-        let addr_ranges = usable_regions
-            .map(|r| r.start..r.end);
-        // transform to an iterator of frame start addresses
-        let frame_addresses = addr_ranges.flat_map(|r| r.step_by(4096));
-        // create `PhysFrame` types from the start addresses
-        frame_addresses.map(|addr| PhysFrame::containing_address(PhysAddr::new(addr)))
     }
 }
 
 unsafe impl FrameAllocator<Size4KiB> for BootInfoFrameAllocator {
+    /// Hands out the next usable frame in constant time. (The old version
+    /// re-walked the whole memory map for every frame, which made mapping a
+    /// big heap quadratic.)
     fn allocate_frame(&mut self) -> Option<PhysFrame> {
-        let frame = self.usable_frames().nth(self.next);
-        self.next += 1;
-        frame
+        loop {
+            let region = self.memory_map.get(self.region)?;
+            if region.kind == MemoryRegionKind::Usable {
+                let start = self.next_addr.max((region.start + 4095) & !4095);
+                if start + 4096 <= region.end {
+                    self.next_addr = start + 4096;
+                    return Some(PhysFrame::containing_address(PhysAddr::new(start)));
+                }
+            }
+            self.region += 1;
+            self.next_addr = 0;
+        }
     }
 }

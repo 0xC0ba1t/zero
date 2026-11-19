@@ -1,4 +1,4 @@
-use crate::fb_println;
+use crate::emergency_println;
 use crate::gdt;
 use crate::input::{self, Key};
 use crate::time;
@@ -76,7 +76,7 @@ pub fn init_idt() {
 extern "x86-interrupt" fn breakpoint_handler(
     stack_frame: InterruptStackFrame)
 {
-    fb_println!("EXCEPTION: BREAKPOINT\n{:#?}", stack_frame);
+    emergency_println!("EXCEPTION: BREAKPOINT\n{:#?}", stack_frame);
 }
 
 /// handles double fault exceptions
@@ -93,10 +93,10 @@ extern "x86-interrupt" fn page_fault_handler(
 ) {
     use x86_64::registers::control::Cr2;
 
-    fb_println!("EXCEPTION: PAGE FAULT");
-    fb_println!("Accessed Address: {:?}", Cr2::read());
-    fb_println!("Error Code: {:?}", error_code);
-    fb_println!("{:#?}", stack_frame);
+    emergency_println!("EXCEPTION: PAGE FAULT");
+    emergency_println!("Accessed Address: {:?}", Cr2::read());
+    emergency_println!("Error Code: {:?}", error_code);
+    emergency_println!("{:#?}", stack_frame);
     crate::hlt_loop_noirq();
 }
 
@@ -145,6 +145,9 @@ extern "x86-interrupt" fn keyboard_interrupt_handler(
                 DecodedKey::RawKey(KeyCode::ArrowRight) => input::push_key(Key::Right),
                 DecodedKey::RawKey(KeyCode::PageUp) => input::push_key(Key::PageUp),
                 DecodedKey::RawKey(KeyCode::PageDown) => input::push_key(Key::PageDown),
+                DecodedKey::RawKey(KeyCode::Home) => input::push_key(Key::Home),
+                DecodedKey::RawKey(KeyCode::End) => input::push_key(Key::End),
+                DecodedKey::RawKey(KeyCode::Delete) => input::push_key(Key::Delete),
                 DecodedKey::RawKey(_) => {}
             }
         }

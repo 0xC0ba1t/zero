@@ -25,6 +25,12 @@ pub enum Key {
     PageUp,
     /// Page Down.
     PageDown,
+    /// Home.
+    Home,
+    /// End.
+    End,
+    /// Delete (forward delete).
+    Delete,
 }
 
 /// A fixed-capacity FIFO queue of keys, backed by a plain array.

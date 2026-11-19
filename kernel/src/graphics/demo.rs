@@ -1,21 +1,27 @@
-use crate::graphics::display::Display;
 use crate::graphics::cube::Cube;
+use crate::graphics::display::Display;
 use crate::graphics::framebuffer::Framebuffer;
+use crate::graphics::vga::BACKGROUND;
 
+/// Spins the cube until a key is pressed.
 pub fn run_demo(display: &mut Framebuffer) {
     let mut cube = Cube::new();
+    let mut last = crate::time::ticks();
 
     loop {
-        display.clear();
+        display.clear_to(BACKGROUND);
         cube.render(display);
+        display.present();
         cube.rotation += 0.05;
 
-        // Check for exit condition (e.g., any key)
         if crate::input::try_read_key().is_some() {
             break;
         }
 
-        // Small delay to control animation speed
-        for _ in 0..1000000 { core::hint::spin_loop(); }
+        // wait for the next timer tick (10 ms) instead of burning the CPU
+        while crate::time::ticks() == last {
+            x86_64::instructions::hlt();
+        }
+        last = crate::time::ticks();
     }
 }

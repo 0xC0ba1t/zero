@@ -1,6 +1,11 @@
 //! Built-in shell commands.
 
+use crate::fs::{Filesystem, FsError, FILESYSTEM};
+use crate::graphics::console::CONSOLE;
+use crate::graphics::vga;
+use crate::input::{self, Key};
 use crate::{fb_print, fb_println};
+use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 
@@ -27,190 +32,53 @@ pub struct Command {
     pub handler: Handler,
 }
 
+macro_rules! command {
+    ($name:expr, $usage:expr, $about:expr, $handler:expr) => {
+        Command { name: $name, usage: $usage, about: $about, handler: $handler }
+    };
+}
+
 /// Every command the shell knows about.
 pub static COMMANDS: &[Command] = &[
-    Command {
-        name: "echo",
-        usage: "echo [text...]",
-        about: "print its arguments",
-        handler: echo,
-    },
-    Command {
-        name: "help",
-        usage: "help [command]",
-        about: "list commands, or show how to use one",
-        handler: help,
-    },
-    Command {
-        name: "clear",
-        usage: "clear",
-        about: "clear the screen",
-        handler: clear,
-    },
-    Command {
-        name: "version",
-        usage: "version",
-        about: "print the kernel name and version",
-        handler: version,
-    },
-    Command {
-        name: "uptime",
-        usage: "uptime",
-        about: "show the time since boot",
-        handler: uptime,
-    },
-    Command {
-        name: "mem",
-        usage: "mem",
-        about: "show heap usage",
-        handler: mem,
-    },
-    Command {
-        name: "color",
-        usage: "color [name]",
-        about: "set the text color, or list the colors",
-        handler: color,
-    },
-    Command {
-        name: "breakpoint",
-        usage: "breakpoint",
-        about: "trigger a breakpoint exception",
-        handler: breakpoint,
-    },
-    Command {
-        name: "panic",
-        usage: "panic",
-        about: "panic on purpose",
-        handler: crash,
-    },
-    Command {
-        name: "reboot",
-        usage: "reboot",
-        about: "restart the machine",
-        handler: reboot,
-    },
-    Command {
-        name: "shutdown",
-        usage: "shutdown",
-        about: "power off (virtual machines only)",
-        handler: shutdown,
-    },
-    Command {
-        name: "history",
-        usage: "history",
-        about: "list the lines you entered",
-        handler: history,
-    },
-    Command {
-        name: "run",
-        usage: "run <program>",
-        about: "run a built-in script (see programs)",
-        handler: run,
-    },
-    Command {
-        name: "programs",
-        usage: "programs",
-        about: "list the built-in scripts",
-        handler: programs,
-    },
-    Command {
-        name: "exec",
-        usage: "exec <script>",
-        about: "run a one-line script, `;` separates statements",
-        handler: exec,
-    },
-    Command {
-        name: "eval",
-        usage: "eval <expression>",
-        about: "print the value of an expression",
-        handler: eval,
-    },
-    Command {
-        name: "src",
-        usage: "src <program>",
-        about: "show the source of a built-in script",
-        handler: src,
-    },
-    Command {
-        name: "ls",
-        usage: "ls [path]",
-        about: "list directory contents",
-        handler: ls,
-    },
-    Command {
-        name: "cat",
-        usage: "cat <path>",
-        about: "print file contents",
-        handler: cat,
-    },
-    Command {
-        name: "touch",
-        usage: "touch <path>",
-        about: "create a new empty file",
-        handler: touch,
-    },
-    Command {
-        name: "rm",
-        usage: "rm <path>",
-        about: "remove a file or directory",
-        handler: rm,
-    },
-    Command {
-        name: "mkdir",
-        usage: "mkdir <path>",
-        about: "create a new directory",
-        handler: mkdir,
-    },
-    Command {
-        name: "pwd",
-        usage: "pwd",
-        about: "print current working directory",
-        handler: pwd,
-    },
-    Command {
-        name: "cd",
-        usage: "cd <path>",
-        about: "change current working directory",
-        handler: cd,
-    },
-    Command {
-        name: "edit",
-        usage: "edit <path>",
-        about: "edit a file (simple line editor)",
-        handler: edit,
-    },
-    Command {
-        name: "cube",
-        usage: "cube",
-        about: "show a spinning 3D cube",
-        handler: cube_demo,
-    },
+    command!("help", "help [command]", "list commands, or show how to use one", help),
+    command!("echo", "echo [text...]", "print its arguments", echo),
+    command!("clear", "clear", "clear the screen", clear),
+    command!("ls", "ls [-l] [path]", "list directory contents", ls),
+    command!("cd", "cd [path]", "change the current directory", cd),
+    command!("pwd", "pwd", "print the current directory", pwd),
+    command!("cat", "cat <path>", "print file contents", cat),
+    command!("write", "write <path> <text...>", "write text to a file (creates it)", write),
+    command!("touch", "touch <path>", "create a new empty file", touch),
+    command!("mkdir", "mkdir <path>", "create a new directory", mkdir),
+    command!("rm", "rm <path>", "remove a file or directory", rm),
+    command!("cp", "cp <from> <to>", "copy a file", cp),
+    command!("mv", "mv <from> <to>", "move or rename a file", mv),
+    command!("edit", "edit <path>", "edit a file (esc saves, ctrl+c discards)", edit),
+    command!("run", "run <program>", "run a built-in script (see programs)", run),
+    command!("programs", "programs", "list the built-in scripts", programs),
+    command!("src", "src <program>", "show the source of a built-in script", src),
+    command!("exec", "exec <script>", "run a one-line script, `;` separates statements", exec),
+    command!("eval", "eval <expression>", "print the value of an expression", eval),
+    command!("color", "color [name]", "set the text color, or list the colors", color),
+    command!("history", "history", "list the lines you entered", history),
+    command!("uptime", "uptime", "show the time since boot", uptime),
+    command!("mem", "mem", "show heap usage", mem),
+    command!("screen", "screen", "show the display mode", screen),
+    command!("bench", "bench", "measure how fast the screen can be drawn", bench),
+    command!("cube", "cube", "show a spinning 3D cube", cube_demo),
+    command!("version", "version", "print the kernel name and version", version),
+    command!("breakpoint", "breakpoint", "trigger a breakpoint exception", breakpoint),
+    command!("panic", "panic", "panic on purpose", crash),
+    command!("reboot", "reboot", "restart the machine", reboot),
+    command!("shutdown", "shutdown", "power off (virtual machines only)", shutdown),
 ];
-
-fn cube_demo(args: &[String]) -> Result<(), CommandError> {
-    expect_no_args(args)?;
-    {
-        let mut fb = crate::graphics::framebuffer::FRAMEBUFFER.lock();
-        match *fb {
-            Some(ref mut display) => crate::graphics::demo::run_demo(display),
-            None => return Err(CommandError::Failed("graphics not initialized")),
-        }
-    }
-    // The demo drew straight onto the screen; wipe it (the lock above is
-    // released, `clear` needs it) so the prompt doesn't print over the cube.
-    crate::graphics::framebuffer::CONSOLE.lock().clear();
-    Ok(())
-}
 
 /// Looks up a command by name.
 pub fn find(name: &str) -> Option<&'static Command> {
     COMMANDS.iter().find(|command| command.name == name)
 }
 
-fn echo(args: &[String]) -> Result<(), CommandError> {
-    fb_println!("{}", args.join(" "));
-    Ok(())
-}
+// ----- helpers -----
 
 /// Fails with a usage error if any arguments were given.
 fn expect_no_args(args: &[String]) -> Result<(), CommandError> {
@@ -221,12 +89,42 @@ fn expect_no_args(args: &[String]) -> Result<(), CommandError> {
     }
 }
 
+fn fs_error(error: FsError) -> CommandError {
+    CommandError::Failed(match error {
+        FsError::NotFound => "no such file or directory",
+        FsError::AlreadyExists => "already exists",
+        FsError::NotADirectory => "not a directory",
+        FsError::IsADirectory => "is a directory",
+        FsError::InvalidPath => "invalid path",
+    })
+}
+
+/// Runs `f` with the file system.
+fn with_fs<R>(f: impl FnOnce(&mut Filesystem) -> Result<R, FsError>) -> Result<R, CommandError> {
+    let mut guard = FILESYSTEM.lock();
+    let fs = guard.as_mut().ok_or(CommandError::Failed("file system not ready"))?;
+    f(fs).map_err(fs_error)
+}
+
+const BLUE: &str = "\x1b[94m";
+const CYAN: &str = "\x1b[96m";
+const GRAY: &str = "\x1b[90m";
+const RESET: &str = "\x1b[0m";
+
+// ----- general -----
+
+fn echo(args: &[String]) -> Result<(), CommandError> {
+    fb_println!("{}", args.join(" "));
+    Ok(())
+}
+
 fn help(args: &[String]) -> Result<(), CommandError> {
     match args {
         [] => {
             for command in COMMANDS {
-                fb_println!("  {:<11}{}", command.name, command.about);
+                fb_println!("  {}{:<12}{}{}", CYAN, command.name, RESET, command.about);
             }
+            fb_println!("{}  tab completes, up/down browse history, page up/down scroll{}", GRAY, RESET);
             Ok(())
         }
         [name] => {
@@ -241,7 +139,7 @@ fn help(args: &[String]) -> Result<(), CommandError> {
 
 fn clear(args: &[String]) -> Result<(), CommandError> {
     expect_no_args(args)?;
-    crate::graphics::framebuffer::CONSOLE.lock().clear();
+    CONSOLE.lock().clear();
     Ok(())
 }
 
@@ -258,37 +156,91 @@ fn uptime(args: &[String]) -> Result<(), CommandError> {
     Ok(())
 }
 
+fn mib(bytes: usize) -> String {
+    format!("{}.{} MiB", bytes / (1024 * 1024), (bytes % (1024 * 1024)) * 10 / (1024 * 1024))
+}
+
 fn mem(args: &[String]) -> Result<(), CommandError> {
     expect_no_args(args)?;
-    fb_println!("heap: {} bytes total", crate::allocator::HEAP_SIZE);
-    fb_println!("      {} bytes used", crate::allocator::heap_used());
-    fb_println!("      {} bytes free", crate::allocator::heap_free());
+    let used = crate::allocator::heap_used();
+    let free = crate::allocator::heap_free();
+    fb_println!("heap  {} total", mib(crate::allocator::HEAP_SIZE));
+    fb_println!("      {} used", mib(used));
+    fb_println!("      {} free", mib(free));
     Ok(())
 }
 
 fn color(args: &[String]) -> Result<(), CommandError> {
     match args {
         [] => {
-            let names = [
-                "black", "blue", "green", "cyan", "red", "magenta",
-                "brown", "lightgray", "darkgray", "lightblue",
-                "lightgreen", "lightcyan", "lightred", "pink",
-                "yellow", "white",
-            ];
-            for name in &names {
-                fb_print!("{} ", name);
+            for (index, name) in vga::COLOR_NAMES.iter().enumerate() {
+                fb_print!("\x1b[38;5;{}m{}\x1b[0m ", index, name);
             }
             fb_println!();
             Ok(())
         }
         [name] => {
-            let foreground = crate::graphics::framebuffer::FbConsole::color_from_name(name)
-                .ok_or(CommandError::Failed("unknown color"))?;
-            crate::graphics::framebuffer::CONSOLE.lock().set_fg_bg(foreground, 0x000000);
+            let index = vga::color_index(name).ok_or(CommandError::Failed("unknown color"))?;
+            CONSOLE.lock().set_default_fg(index);
             Ok(())
         }
         _ => Err(CommandError::Usage),
     }
+}
+
+fn history(args: &[String]) -> Result<(), CommandError> {
+    expect_no_args(args)?;
+    for (index, line) in super::history::HISTORY.lock().iter().enumerate() {
+        fb_println!("{}{:>4}{}  {}", GRAY, index + 1, RESET, line);
+    }
+    Ok(())
+}
+
+fn screen(args: &[String]) -> Result<(), CommandError> {
+    expect_no_args(args)?;
+    let mode = crate::graphics::framebuffer::with(|fb| {
+        (fb.info.width, fb.info.height, fb.info.bytes_per_pixel * 8, fb.info.pixel_format)
+    })
+    .ok_or(CommandError::Failed("no framebuffer"))?;
+    let (cols, rows) = CONSOLE.lock().size();
+    fb_println!("display  {}x{}, {} bits per pixel, {:?}", mode.0, mode.1, mode.2, mode.3);
+    fb_println!("console  {} columns x {} rows", cols, rows);
+    fb_println!("scripts  80x25 cell grid, {}x{} pixels per cell", mode.0 / 80, mode.1 / 25);
+    Ok(())
+}
+
+/// Fills the whole screen repeatedly and reports the frame rate.
+fn bench(args: &[String]) -> Result<(), CommandError> {
+    expect_no_args(args)?;
+    const FRAMES: u64 = 120;
+    let start = crate::time::uptime_ms();
+    let size = crate::graphics::framebuffer::with(|fb| {
+        use crate::graphics::display::Display;
+        for frame in 0..FRAMES {
+            let shade = (frame * 2 % 256) as u32;
+            fb.clear_to(shade << 16 | shade << 8 | shade);
+            fb.flush();
+        }
+        (fb.width(), fb.height())
+    })
+    .ok_or(CommandError::Failed("no framebuffer"))?;
+    let ms = (crate::time::uptime_ms() - start).max(1);
+    CONSOLE.lock().restore();
+    let pixels = size.0 as u64 * size.1 as u64 * FRAMES;
+    fb_println!(
+        "{} full-screen frames at {}x{} in {} ms: {} fps, {} Mpixel/s",
+        FRAMES, size.0, size.1, ms, FRAMES * 1000 / ms, pixels / ms / 1000
+    );
+    Ok(())
+}
+
+fn cube_demo(args: &[String]) -> Result<(), CommandError> {
+    expect_no_args(args)?;
+    crate::graphics::framebuffer::with(crate::graphics::demo::run_demo)
+        .ok_or(CommandError::Failed("graphics not initialized"))?;
+    // The demo drew straight onto the screen; bring the console back.
+    CONSOLE.lock().restore();
+    Ok(())
 }
 
 fn breakpoint(args: &[String]) -> Result<(), CommandError> {
@@ -314,13 +266,7 @@ fn shutdown(args: &[String]) -> Result<(), CommandError> {
     crate::power::shutdown()
 }
 
-fn history(args: &[String]) -> Result<(), CommandError> {
-    expect_no_args(args)?;
-    for (index, line) in super::history::HISTORY.lock().iter().enumerate() {
-        fb_println!("{:>3}  {}", index + 1, line);
-    }
-    Ok(())
-}
+// ----- scripts -----
 
 /// Runs script source on the real screen and keyboard, reporting errors.
 fn run_script(source: &str) -> Result<(), CommandError> {
@@ -328,6 +274,7 @@ fn run_script(source: &str) -> Result<(), CommandError> {
     match crate::script::run(source, &mut host) {
         Ok(()) => Ok(()),
         Err(error) => {
+            drop(host);
             fb_println!("script error: {}", error);
             Err(CommandError::Reported)
         }
@@ -347,7 +294,7 @@ fn run(args: &[String]) -> Result<(), CommandError> {
 fn programs(args: &[String]) -> Result<(), CommandError> {
     expect_no_args(args)?;
     for program in crate::script::programs::PROGRAMS {
-        fb_println!("  {:<11}{}", program.name, program.about);
+        fb_println!("  {}{:<13}{}{}", CYAN, program.name, RESET, program.about);
     }
     Ok(())
 }
@@ -363,7 +310,7 @@ fn eval(args: &[String]) -> Result<(), CommandError> {
     if args.is_empty() {
         return Err(CommandError::Usage);
     }
-    run_script(&alloc::format!("print {}", args.join(" ")))
+    run_script(&format!("print {}", args.join(" ")))
 }
 
 fn src(args: &[String]) -> Result<(), CommandError> {
@@ -379,19 +326,61 @@ fn src(args: &[String]) -> Result<(), CommandError> {
     Ok(())
 }
 
+// ----- files -----
+
 fn ls(args: &[String]) -> Result<(), CommandError> {
-    let path = match args {
-        [] => "/",
-        [path] => path,
+    let (long, path) = match args {
+        [] => (false, "."),
+        [flag] if flag == "-l" => (true, "."),
+        [path] => (false, path.as_str()),
+        [flag, path] if flag == "-l" => (true, path.as_str()),
         _ => return Err(CommandError::Usage),
     };
-    let fs = crate::fs::FILESYSTEM.lock();
-    let fs = fs.as_ref().ok_or(CommandError::Failed("fs not initialized"))?;
-    let list = fs.list(path)
-        .map_err(|_| CommandError::Failed("no such directory"))?;
-    for item in list {
-        fb_println!("{}", item);
+    let entries = with_fs(|fs| fs.entries(path))?;
+    if entries.is_empty() {
+        return Ok(());
     }
+    if long {
+        for entry in &entries {
+            if entry.is_dir {
+                fb_println!("{}  {:>8}  {}{}/{}", GRAY, "-", BLUE, entry.name, RESET);
+            } else {
+                fb_println!("{}  {:>8}{}  {}", GRAY, entry.size, RESET, entry.name);
+            }
+        }
+        return Ok(());
+    }
+    // short form: fill the screen width with columns
+    let (cols, _) = CONSOLE.lock().size();
+    let width = entries.iter().map(|e| e.name.len() + 1).max().unwrap_or(1) + 2;
+    let per_row = (cols / width).max(1);
+    for chunk in entries.chunks(per_row) {
+        for entry in chunk {
+            let pad = width - entry.name.len() - if entry.is_dir { 1 } else { 0 };
+            if entry.is_dir {
+                fb_print!("{}{}/{}{:pad$}", BLUE, entry.name, RESET, "", pad = pad);
+            } else {
+                fb_print!("{}{:pad$}", entry.name, "", pad = pad);
+            }
+        }
+        fb_println!();
+    }
+    Ok(())
+}
+
+fn cd(args: &[String]) -> Result<(), CommandError> {
+    let path = match args {
+        [] => "/",
+        [path] => path.as_str(),
+        _ => return Err(CommandError::Usage),
+    };
+    with_fs(|fs| fs.set_cwd(path))
+}
+
+fn pwd(args: &[String]) -> Result<(), CommandError> {
+    expect_no_args(args)?;
+    let cwd = with_fs(|fs| Ok(fs.get_cwd()))?;
+    fb_println!("{}", cwd);
     Ok(())
 }
 
@@ -400,197 +389,248 @@ fn cat(args: &[String]) -> Result<(), CommandError> {
         [path] => path,
         _ => return Err(CommandError::Usage),
     };
-    let fs = crate::fs::FILESYSTEM.lock();
-    let fs = fs.as_ref().ok_or(CommandError::Failed("fs not initialized"))?;
-    let data = fs.read_file(path)
-        .map_err(|_| CommandError::Failed("no such file"))?;
-    fb_println!("{}", alloc::string::String::from_utf8_lossy(&data));
+    let data = with_fs(|fs| fs.read_file(path))?;
+    let text = String::from_utf8_lossy(&data);
+    fb_print!("{}", text);
+    if !text.ends_with('\n') {
+        fb_println!();
+    }
     Ok(())
+}
+
+fn write(args: &[String]) -> Result<(), CommandError> {
+    let (path, text) = match args {
+        [path, text @ ..] if !text.is_empty() => (path, text.join(" ")),
+        _ => return Err(CommandError::Usage),
+    };
+    let mut data = text.into_bytes();
+    data.push(b'\n');
+    with_fs(|fs| fs.write_file(path, data))
 }
 
 fn touch(args: &[String]) -> Result<(), CommandError> {
-    let path = match args {
-        [path] => path,
-        _ => return Err(CommandError::Usage),
-    };
-    crate::fs::FILESYSTEM
-        .lock()
-        .as_mut()
-        .ok_or(CommandError::Failed("fs not initialized"))?
-        .create_file(path)
-        .map_err(|_| CommandError::Failed("could not create file"))?;
-    Ok(())
-}
-
-fn rm(args: &[String]) -> Result<(), CommandError> {
-    let path = match args {
-        [path] => path,
-        _ => return Err(CommandError::Usage),
-    };
-    crate::fs::FILESYSTEM
-        .lock()
-        .as_mut()
-        .ok_or(CommandError::Failed("fs not initialized"))?
-        .delete(path)
-        .map_err(|_| CommandError::Failed("could not remove file/directory"))?;
-    Ok(())
+    match args {
+        [path] => with_fs(|fs| fs.create_file(path)),
+        _ => Err(CommandError::Usage),
+    }
 }
 
 fn mkdir(args: &[String]) -> Result<(), CommandError> {
-    let path = match args {
-        [path] => path,
-        _ => return Err(CommandError::Usage),
-    };
-    crate::fs::FILESYSTEM
-        .lock()
-        .as_mut()
-        .ok_or(CommandError::Failed("fs not initialized"))?
-        .create_dir(path)
-        .map_err(|_| CommandError::Failed("could not create directory"))?;
-    Ok(())
+    match args {
+        [path] => with_fs(|fs| fs.create_dir(path)),
+        _ => Err(CommandError::Usage),
+    }
 }
 
-fn pwd(args: &[String]) -> Result<(), CommandError> {
-    expect_no_args(args)?;
-    let fs = crate::fs::FILESYSTEM.lock();
-    let fs = fs.as_ref().ok_or(CommandError::Failed("fs not initialized"))?;
-    fb_println!("{}", fs.get_cwd());
-    Ok(())
+fn rm(args: &[String]) -> Result<(), CommandError> {
+    match args {
+        [path] => with_fs(|fs| fs.delete(path)),
+        _ => Err(CommandError::Usage),
+    }
 }
 
-fn cd(args: &[String]) -> Result<(), CommandError> {
-    let path = match args {
-        [path] => path,
-        _ => return Err(CommandError::Usage),
-    };
-    crate::fs::FILESYSTEM
-        .lock()
-        .as_mut()
-        .ok_or(CommandError::Failed("fs not initialized"))?
-        .set_cwd(path)
-        .map_err(|_| CommandError::Failed("could not change directory"))?;
-    Ok(())
+fn cp(args: &[String]) -> Result<(), CommandError> {
+    match args {
+        [from, to] => with_fs(|fs| {
+            let data = fs.read_file(from)?;
+            // copying into a directory keeps the file name
+            let target = if fs.is_dir(to) {
+                let name = from.rsplit('/').next().unwrap_or(from);
+                format!("{}/{}", to, name)
+            } else {
+                to.clone()
+            };
+            fs.write_file(&target, data)
+        }),
+        _ => Err(CommandError::Usage),
+    }
 }
 
+fn mv(args: &[String]) -> Result<(), CommandError> {
+    match args {
+        [from, to] => {
+            cp(args)?;
+            with_fs(|fs| fs.delete(from))?;
+            let _ = to;
+            Ok(())
+        }
+        _ => Err(CommandError::Usage),
+    }
+}
+
+// ----- the editor -----
+
+/// A small full-screen text editor. Escape saves and quits, ctrl+c quits
+/// without saving, ctrl+s saves.
 fn edit(args: &[String]) -> Result<(), CommandError> {
     let path = match args {
         [path] => path,
         _ => return Err(CommandError::Usage),
     };
+    let mut lines: Vec<String> = match with_fs(|fs| fs.read_file(path)) {
+        Ok(data) => String::from_utf8_lossy(&data).lines().map(String::from).collect(),
+        Err(_) => Vec::new(),
+    };
+    if lines.is_empty() {
+        lines.push(String::new());
+    }
 
-    let content = {
-        let fs = crate::fs::FILESYSTEM.lock();
-        let fs = fs.as_ref().ok_or(CommandError::Failed("fs not initialized"))?;
-        fs.read_file(path).unwrap_or_default()
+    let (cols, rows) = CONSOLE.lock().size();
+    let text_rows = rows.saturating_sub(1).max(1);
+    let max_len = cols.saturating_sub(1).max(1);
+    let (mut cx, mut cy, mut top) = (0usize, 0usize, 0usize);
+    let mut modified = false;
+    let mut save = false;
+
+    let store = |lines: &[String]| -> Result<(), CommandError> {
+        let mut data = lines.join("\n").into_bytes();
+        data.push(b'\n');
+        with_fs(|fs| fs.write_file(path, data))
     };
 
-    let mut console = crate::graphics::framebuffer::CONSOLE.lock();
-    console.clear();
-
-    let lines: Vec<String> = alloc::string::String::from_utf8_lossy(&content)
-        .lines()
-        .map(String::from)
-        .collect();
-    let mut lines = lines;
-    if lines.is_empty() { lines.push(String::new()); }
-
-    let mut cursor_x = 0;
-    let mut cursor_y = 0;
-
     loop {
-        console.clear();
-        for i in 0..25 {
-            if let Some(row_content) = lines.get(i) {
-                console.write_at(0, i, row_content);
-            }
+        if cy < top {
+            top = cy;
+        } else if cy >= top + text_rows {
+            top = cy + 1 - text_rows;
         }
+        draw_editor(&lines, top, text_rows, cols, cx, cy, path, modified);
 
-        let key = crate::input::read_key();
-        match key {
-            crate::input::Key::Char(c) => {
-                if c == '\u{1b}' { // ESC to quit/save
-                    break;
-                } else if c == '\u{8}' {
-                    if cursor_x > 0 {
-                        lines[cursor_y].remove(cursor_x - 1);
-                        cursor_x -= 1;
-                    }
-                } else if c == '\n' {
-                    let split = lines[cursor_y].split_off(cursor_x);
-                    lines.insert(cursor_y + 1, split);
-                    cursor_y += 1;
-                    cursor_x = 0;
-                } else if c.is_ascii() && !c.is_ascii_control() {
-                    // ASCII only: `cursor_x` is a byte index into the line, so a
-                    // multi-byte char would make later edits panic.
-                    lines[cursor_y].insert(cursor_x, c);
-                    cursor_x += 1;
+        match input::read_key() {
+            Key::Char('\u{1b}') => {
+                save = true;
+                break;
+            }
+            Key::Char('\u{3}') => break,
+            Key::Char('\u{13}') => {
+                store(&lines)?;
+                modified = false;
+            }
+            Key::Char('\n') | Key::Char('\r') => {
+                let rest = lines[cy].split_off(cx);
+                lines.insert(cy + 1, rest);
+                cy += 1;
+                cx = 0;
+                modified = true;
+            }
+            Key::Char('\u{8}') => {
+                if cx > 0 {
+                    lines[cy].remove(cx - 1);
+                    cx -= 1;
+                    modified = true;
+                } else if cy > 0 {
+                    let line = lines.remove(cy);
+                    cy -= 1;
+                    cx = lines[cy].len();
+                    lines[cy].push_str(&line);
+                    lines[cy].truncate(max_len);
+                    modified = true;
                 }
             }
-            crate::input::Key::Up => if cursor_y > 0 { cursor_y -= 1; cursor_x = core::cmp::min(cursor_x, lines[cursor_y].len()); },
-            crate::input::Key::Down => if cursor_y < lines.len() - 1 { cursor_y += 1; cursor_x = core::cmp::min(cursor_x, lines[cursor_y].len()); },
-            crate::input::Key::Left => if cursor_x > 0 { cursor_x -= 1; },
-            crate::input::Key::Right => if cursor_x < lines[cursor_y].len() { cursor_x += 1; },
+            Key::Char('\u{7f}') | Key::Delete => {
+                if cx < lines[cy].len() {
+                    lines[cy].remove(cx);
+                    modified = true;
+                } else if cy + 1 < lines.len() {
+                    let next = lines.remove(cy + 1);
+                    lines[cy].push_str(&next);
+                    lines[cy].truncate(max_len);
+                    modified = true;
+                }
+            }
+            Key::Char('\t') => {
+                for _ in 0..4 {
+                    if lines[cy].len() < max_len {
+                        lines[cy].insert(cx, ' ');
+                        cx += 1;
+                        modified = true;
+                    }
+                }
+            }
+            Key::Char(c) if c.is_ascii() && !c.is_ascii_control() => {
+                if lines[cy].len() < max_len {
+                    lines[cy].insert(cx, c);
+                    cx += 1;
+                    modified = true;
+                }
+            }
+            Key::Left => {
+                if cx > 0 {
+                    cx -= 1;
+                } else if cy > 0 {
+                    cy -= 1;
+                    cx = lines[cy].len();
+                }
+            }
+            Key::Right => {
+                if cx < lines[cy].len() {
+                    cx += 1;
+                } else if cy + 1 < lines.len() {
+                    cy += 1;
+                    cx = 0;
+                }
+            }
+            Key::Up => {
+                cy = cy.saturating_sub(1);
+                cx = cx.min(lines[cy].len());
+            }
+            Key::Down => {
+                if cy + 1 < lines.len() {
+                    cy += 1;
+                }
+                cx = cx.min(lines[cy].len());
+            }
+            Key::PageUp => {
+                cy = cy.saturating_sub(text_rows);
+                cx = cx.min(lines[cy].len());
+            }
+            Key::PageDown => {
+                cy = (cy + text_rows).min(lines.len() - 1);
+                cx = cx.min(lines[cy].len());
+            }
+            Key::Home => cx = 0,
+            Key::End => cx = lines[cy].len(),
             _ => {}
         }
     }
 
-    let new_content = lines.join("\n").into_bytes();
-    crate::fs::FILESYSTEM
-        .lock()
-        .as_mut()
-        .ok_or(CommandError::Failed("fs not initialized"))?
-        .write_file(path, new_content)
-        .map_err(|_| CommandError::Failed("could not save file"))?;
-
-    console.clear();
-    Ok(())
+    let result = if save { store(&lines) } else { Ok(()) };
+    fb_print!("\x1b[2J");
+    result
 }
 
-/// Returns the name of the only command or file that starts with `prefix`, if there is exactly one.
-pub fn complete(prefix: &str) -> Option<String> {
-    if prefix.is_empty() {
-        return None;
+/// Paints the whole editor in one go (one console write, so one screen update).
+fn draw_editor(
+    lines: &[String],
+    top: usize,
+    text_rows: usize,
+    cols: usize,
+    cx: usize,
+    cy: usize,
+    path: &str,
+    modified: bool,
+) {
+    let mut out = String::with_capacity((cols + 1) * (text_rows + 2));
+    out.push_str("\x1b[2J\x1b[H");
+    for row in 0..text_rows {
+        match lines.get(top + row) {
+            Some(line) => out.push_str(line),
+            None => out.push_str("\x1b[90m~\x1b[0m"),
+        }
+        out.push('\n');
     }
-
-    // Try completing commands
-    let command_matches: Vec<_> = COMMANDS
-        .iter()
-        .filter(|command| command.name.starts_with(prefix))
-        .collect();
-
-    // Try completing files (if filesystem is initialized)
-    let file_matches = if let Some(Ok(fs)) = crate::fs::FILESYSTEM.lock().as_ref().map(|fs| fs.list("/")) {
-        fs.iter()
-            .filter(|name| name.starts_with(prefix))
-            .cloned()
-            .collect::<Vec<_>>()
-    } else {
-        Vec::new()
-    };
-
-    let all_matches: Vec<String> = command_matches
-        .iter()
-        .map(|c| String::from(c.name))
-        .chain(file_matches.into_iter())
-        .collect();
-
-    if all_matches.len() == 1 {
-        Some(all_matches[0].clone())
-    } else {
-        None
+    let status = format!(
+        " {}{}   Ln {}, Col {}   esc: save+quit  ctrl+s: save  ctrl+c: discard",
+        path,
+        if modified { " [modified]" } else { "" },
+        cy + 1,
+        cx + 1
+    );
+    out.push_str("\x1b[30;47m");
+    for i in 0..cols {
+        out.push(status.as_bytes().get(i).map(|&b| b as char).unwrap_or(' '));
     }
-}
-
-#[test_case]
-fn test_complete_unique_prefix() {
-    assert_eq!(complete("ec"), Some(String::from("echo")));
-    assert_eq!(complete("shut"), Some(String::from("shutdown")));
-}
-
-#[test_case]
-fn test_complete_rejects_ambiguous_or_unknown_prefixes() {
-    assert_eq!(complete("c"), None); // clear, color
-    assert_eq!(complete("zzz"), None);
-    assert_eq!(complete(""), None);
+    out.push_str("\x1b[0m");
+    out.push_str(&format!("\x1b[{};{}H", cy - top + 1, cx + 1));
+    fb_print!("{}", out);
 }

@@ -39,7 +39,7 @@ impl Cube {
 
         // Simple rotation matrix
         let rotation_matrix = Mat4::from_rotation_y(self.rotation) * Mat4::from_rotation_x(self.rotation * 0.5);
-        let projection_matrix = Mat4::perspective_rh(1.0, 1.33, 0.1, 100.0);
+        let projection_matrix = Mat4::perspective_rh(1.0, width as f32 / height as f32, 0.1, 100.0);
 
         let transform = projection_matrix * Mat4::from_translation(self.position) * rotation_matrix;
 

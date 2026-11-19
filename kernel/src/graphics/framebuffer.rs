@@ -1,45 +1,220 @@
+//! The screen.
+//!
+//! Everything is drawn into a shadow buffer in ordinary RAM and copied to the
+//! real framebuffer in one go by [`Framebuffer::flush`]. Reading and writing
+//! video memory pixel by pixel is by far the slowest thing the kernel could
+//! do, so drawing code never touches it directly; only the rows that changed
+//! since the last flush are copied.
+
 use crate::graphics::display::Display;
+use alloc::vec;
+use alloc::vec::Vec;
 use bootloader_api::info::{FrameBufferInfo, PixelFormat};
 use spin::Mutex;
 
 pub static FRAMEBUFFER: Mutex<Option<Framebuffer>> = Mutex::new(None);
 
+/// Runs `f` on the framebuffer, if there is one.
+pub fn with<R>(f: impl FnOnce(&mut Framebuffer) -> R) -> Option<R> {
+    FRAMEBUFFER.lock().as_mut().map(f)
+}
+
 pub struct Framebuffer {
     pub info: FrameBufferInfo,
-    pub buffer: &'static mut [u8],
+    front: &'static mut [u8],
+    back: Vec<u8>,
+    /// Bytes per pixel.
+    bpp: usize,
+    /// Bytes per scan line.
+    pitch: usize,
+    /// Rows `dirty_lo..dirty_hi` differ between the shadow buffer and the screen.
+    dirty_lo: usize,
+    dirty_hi: usize,
 }
 
 impl Framebuffer {
     pub fn new(info: FrameBufferInfo, buffer: &'static mut [u8]) -> Self {
-        Self { info, buffer }
+        let bpp = info.bytes_per_pixel.max(1);
+        let pitch = info.stride * bpp;
+        let back = vec![0u8; buffer.len()];
+        let mut fb = Framebuffer {
+            info,
+            front: buffer,
+            back,
+            bpp,
+            pitch,
+            dirty_lo: 0,
+            dirty_hi: 0,
+        };
+        fb.mark_dirty(0, info.height);
+        fb
     }
-}
 
-impl Display for Framebuffer {
-    fn put_pixel(&mut self, x: usize, y: usize, color: u32) {
-        if x < self.info.width && y < self.info.height {
-            let pixel_offset = y * self.info.stride + x;
-            let bytes_per_pixel = self.info.bytes_per_pixel;
-            let byte_offset = pixel_offset * bytes_per_pixel;
-            // `color` is 0x00RRGGBB; lay the channels out the way the
-            // bootloader says the screen expects them.
-            let r = (color >> 16) as u8;
-            let g = (color >> 8) as u8;
-            let b = color as u8;
-            let pixel: [u8; 4] = match self.info.pixel_format {
-                PixelFormat::Rgb => [r, g, b, 0],
-                PixelFormat::U8 => [((r as u16 + g as u16 + b as u16) / 3) as u8, 0, 0, 0],
-                _ => [b, g, r, 0],
-            };
-            let len = bytes_per_pixel.min(pixel.len());
-            if len > 0 && byte_offset + len <= self.buffer.len() {
-                self.buffer[byte_offset..byte_offset + len].copy_from_slice(&pixel[..len]);
+    #[inline]
+    fn mark_dirty(&mut self, lo: usize, hi: usize) {
+        if self.dirty_lo == self.dirty_hi {
+            self.dirty_lo = lo;
+            self.dirty_hi = hi;
+        } else {
+            self.dirty_lo = self.dirty_lo.min(lo);
+            self.dirty_hi = self.dirty_hi.max(hi);
+        }
+    }
+
+    /// Lays a `0x00RRGGBB` color out the way the screen expects its channels.
+    #[inline]
+    pub fn pack(&self, color: u32) -> [u8; 4] {
+        let r = (color >> 16) as u8;
+        let g = (color >> 8) as u8;
+        let b = color as u8;
+        match self.info.pixel_format {
+            PixelFormat::Rgb => [r, g, b, 0],
+            PixelFormat::U8 => [((r as u16 + g as u16 + b as u16) / 3) as u8, 0, 0, 0],
+            _ => [b, g, r, 0],
+        }
+    }
+
+    /// Copies the rows that changed to the screen.
+    pub fn flush(&mut self) {
+        if self.dirty_lo >= self.dirty_hi {
+            return;
+        }
+        let hi = self.dirty_hi.min(self.info.height);
+        let start = self.dirty_lo * self.pitch;
+        let end = (hi * self.pitch).min(self.front.len());
+        if start < end {
+            self.front[start..end].copy_from_slice(&self.back[start..end]);
+        }
+        self.dirty_lo = 0;
+        self.dirty_hi = 0;
+    }
+
+    /// Moves the picture up by `dy` rows and fills the rows that open up at
+    /// the bottom with `fill`.
+    pub fn scroll_up(&mut self, dy: usize, fill: u32) {
+        let h = self.info.height;
+        if dy == 0 {
+            return;
+        }
+        if dy >= h {
+            self.clear_to(fill);
+            return;
+        }
+        self.back.copy_within(dy * self.pitch..h * self.pitch, 0);
+        self.fill_rect(0, h - dy, self.info.width, dy, fill);
+        self.mark_dirty(0, h);
+    }
+
+    pub fn clear_to(&mut self, color: u32) {
+        let (w, h) = (self.info.width, self.info.height);
+        self.fill_rect(0, 0, w, h, color);
+    }
+
+    /// Fills `w` pixels of one row starting at `(x, y)`.
+    #[inline]
+    fn fill_span(&mut self, x: usize, y: usize, w: usize, px: [u8; 4]) {
+        let off = y * self.pitch + x * self.bpp;
+        let end = off + w * self.bpp;
+        if end > self.back.len() {
+            return;
+        }
+        let row = &mut self.back[off..end];
+        match self.bpp {
+            4 => {
+                for c in row.chunks_exact_mut(4) {
+                    c.copy_from_slice(&px);
+                }
+            }
+            3 => {
+                for c in row.chunks_exact_mut(3) {
+                    c.copy_from_slice(&px[..3]);
+                }
+            }
+            n => {
+                for c in row.chunks_exact_mut(n) {
+                    c.copy_from_slice(&px[..n.min(4)]);
+                }
             }
         }
     }
 
+    /// Draws one anti-aliased glyph: `alpha` rows give the coverage of the
+    /// foreground color over the background color for each pixel.
+    pub fn draw_alpha(&mut self, x: usize, y: usize, alpha: &[&[u8]], fg: u32, bg: u32) {
+        let (w, h) = (self.info.width, self.info.height);
+        let pfg = self.pack(fg);
+        let pbg = self.pack(bg);
+        let bpp = self.bpp;
+        let mut rows = 0;
+        for (dy, row) in alpha.iter().enumerate() {
+            let yy = y + dy;
+            if yy >= h {
+                break;
+            }
+            rows += 1;
+            let n = row.len().min(w.saturating_sub(x));
+            let off = yy * self.pitch + x * bpp;
+            if off + n * bpp > self.back.len() {
+                break;
+            }
+            let dst = &mut self.back[off..off + n * bpp];
+            for (a, d) in row[..n].iter().zip(dst.chunks_exact_mut(bpp)) {
+                let a = *a as u32;
+                if a == 0 {
+                    d.copy_from_slice(&pbg[..bpp.min(4)]);
+                } else if a == 255 {
+                    d.copy_from_slice(&pfg[..bpp.min(4)]);
+                } else {
+                    let ia = 255 - a;
+                    for c in 0..bpp.min(4) {
+                        d[c] = ((pfg[c] as u32 * a + pbg[c] as u32 * ia) / 255) as u8;
+                    }
+                }
+            }
+        }
+        if rows > 0 {
+            self.mark_dirty(y, y + rows);
+        }
+    }
+}
+
+impl Display for Framebuffer {
+    #[inline]
+    fn put_pixel(&mut self, x: usize, y: usize, color: u32) {
+        if x < self.info.width && y < self.info.height {
+            let px = self.pack(color);
+            let off = y * self.pitch + x * self.bpp;
+            let n = self.bpp.min(4);
+            if off + n <= self.back.len() {
+                self.back[off..off + n].copy_from_slice(&px[..n]);
+                self.mark_dirty(y, y + 1);
+            }
+        }
+    }
+
+    fn fill_rect(&mut self, x: usize, y: usize, w: usize, h: usize, color: u32) {
+        if x >= self.info.width || y >= self.info.height || w == 0 || h == 0 {
+            return;
+        }
+        let w = w.min(self.info.width - x);
+        let h = h.min(self.info.height - y);
+        let px = self.pack(color);
+        // paint the first row, then copy it down
+        self.fill_span(x, y, w, px);
+        let first = y * self.pitch + x * self.bpp;
+        let len = w * self.bpp;
+        for row in 1..h {
+            let dst = (y + row) * self.pitch + x * self.bpp;
+            if dst + len > self.back.len() {
+                break;
+            }
+            self.back.copy_within(first..first + len, dst);
+        }
+        self.mark_dirty(y, y + h);
+    }
+
     fn clear(&mut self) {
-        self.buffer.fill(0);
+        self.clear_to(0);
     }
 
     fn width(&self) -> usize {
@@ -49,312 +224,50 @@ impl Display for Framebuffer {
     fn height(&self) -> usize {
         self.info.height
     }
+
+    fn present(&mut self) {
+        self.flush();
+    }
 }
 
-/// A simple text console that renders to the framebuffer using an 8x8 font.
-pub struct FbConsole {
-    /// Current cursor position in character cells.
-    col: usize,
-    row: usize,
-    /// Foreground and background colors (u32 framebuffer format).
-    pub fg: u32,
-    pub bg: u32,
-    /// Whether the console has been initialized.
-    initialized: bool,
-    /// Number of visible text columns.
-    cols: usize,
-    /// Number of visible text rows.
-    rows: usize,
-    /// Scrollback: each entry is one row of characters.
-    scrollback: alloc::vec::Vec<alloc::vec::Vec<char>>,
-}
-
-lazy_static::lazy_static! {
-    pub static ref CONSOLE: Mutex<FbConsole> = Mutex::new(FbConsole {
-        col: 0,
-        row: 0,
-        fg: 0xFFFFFF,
-        bg: 0x000000,
-        initialized: false,
-        cols: 0,
-        rows: 0,
-        scrollback: alloc::vec::Vec::new(),
-    });
-}
-
-const CHAR_W: usize = crate::graphics::font::CHAR_WIDTH + 2;
-const CHAR_H: usize = crate::graphics::font::CHAR_HEIGHT + 2;
-
-impl FbConsole {
-    pub fn init(&mut self) {
-        let cols;
-        let rows;
-        {
-            let mut fb_guard = FRAMEBUFFER.lock();
-            if let Some(ref mut fb) = *fb_guard {
-                fb.clear();
-                cols = (fb.width() / CHAR_W).max(1);
-                rows = (fb.height() / CHAR_H).max(1);
-            } else {
-                cols = 80;
-                rows = 30;
-            }
-        }
-        self.cols = cols;
-        self.rows = rows;
-        self.col = 0;
-        self.row = 0;
-        self.scrollback.clear();
-        self.initialized = true;
-    }
-
-    pub fn clear(&mut self) {
-        let (cols, rows) = {
-            let mut fb_guard = FRAMEBUFFER.lock();
-            if let Some(ref mut fb) = *fb_guard {
-                fb.clear();
-                ((fb.width() / CHAR_W).max(1), (fb.height() / CHAR_H).max(1))
-            } else {
-                (80, 30)
-            }
-        };
-        self.col = 0;
-        self.row = 0;
-        self.scrollback.clear();
-        if self.cols == 0 {
-            self.cols = cols;
-            self.rows = rows;
-        }
-    }
-
-    pub fn set_fg_bg(&mut self, fg: u32, bg: u32) {
-        self.fg = fg;
-        self.bg = bg;
-    }
-
-    pub fn color_from_name(name: &str) -> Option<u32> {
-        let lower = name.to_lowercase();
-        let c = match lower.as_str() {
-            "black" => 0x000000,
-            "blue" => 0x0000AA,
-            "green" => 0x00AA00,
-            "cyan" => 0x00AAAA,
-            "red" => 0xAA0000,
-            "magenta" => 0xAA00AA,
-            "brown" => 0xAA5500,
-            "lightgray" => 0xAAAAAA,
-            "darkgray" => 0x555555,
-            "lightblue" => 0x5555FF,
-            "lightgreen" => 0x55FF55,
-            "lightcyan" => 0x55FFFF,
-            "lightred" => 0xFF5555,
-            "pink" => 0xFF55FF,
-            "yellow" => 0xFFFF55,
-            "white" => 0xFFFFFF,
-            _ => return None,
-        };
-        Some(c)
-    }
-
-    pub fn scroll_up(&mut self) {
-        // Scroll the visible window up by one row in the scrolback buffer
-        self.redraw();
-    }
-
-    pub fn scroll_down(&mut self) {
-        // For simplicity, just redraw current view
-        self.redraw();
-    }
-
-    /// Write a text string at a specific (col, row) position in the text grid.
-    pub fn write_at(&mut self, col: usize, row: usize, text: &str) {
-        if !self.initialized {
+impl Framebuffer {
+    /// Draws an anti-aliased glyph stretched to fill a `w` x `h` box, using
+    /// bilinear interpolation of its coverage.
+    pub fn draw_alpha_scaled(&mut self, x: usize, y: usize, w: usize, h: usize, alpha: &[&[u8]], fg: u32, bg: u32) {
+        let sh = alpha.len();
+        let sw = alpha.first().map_or(0, |row| row.len());
+        if sh == 0 || sw == 0 || w == 0 || h == 0 || x >= self.info.width || y >= self.info.height {
             return;
         }
-        let mut fb_guard = FRAMEBUFFER.lock();
-        if let Some(ref mut fb) = *fb_guard {
-            for (i, byte) in text.bytes().enumerate() {
-                let c = col + i;
-                if c >= self.cols {
-                    break;
-                }
-                let px = c * CHAR_W;
-                let py = row * CHAR_H;
-                crate::graphics::font::draw_char(fb, px, py, byte, self.fg, self.bg);
-            }
-        }
-    }
-
-    /// Write a single byte at a specific (col, row) position in the text grid.
-    pub fn write_byte_at(&mut self, col: usize, row: usize, byte: u8) {
-        if !self.initialized {
-            return;
-        }
-        let mut fb_guard = FRAMEBUFFER.lock();
-        if let Some(ref mut fb) = *fb_guard {
-            if col < self.cols && row < self.rows {
-                let px = col * CHAR_W;
-                let py = row * CHAR_H;
-                crate::graphics::font::draw_char(fb, px, py, byte, self.fg, self.bg);
-            }
-        }
-    }
-
-    /// Drops the top text row, keeps the cursor on the last row and redraws.
-    ///
-    /// Rows are created lazily, so the scrollback can be shorter than the
-    /// screen (e.g. after several blank lines); draining an empty `Vec`
-    /// would panic, hence the check.
-    fn scroll_one_row(&mut self) {
-        if !self.scrollback.is_empty() {
-            self.scrollback.remove(0);
-        }
-        self.row = self.rows.saturating_sub(1);
-        self.redraw();
-    }
-
-    /// Redraw the entire visible region from scrollback.
-    fn redraw(&mut self) {
-        let mut fb_guard = FRAMEBUFFER.lock();
-        if let Some(ref mut fb) = *fb_guard {
-            fb.clear();
-        }
-        let start = if self.scrollback.len() > self.rows {
-            self.scrollback.len() - self.rows
-        } else {
-            0
-        };
-        for (screen_row, entry) in self.scrollback.iter().enumerate().skip(start) {
-            if screen_row - start >= self.rows {
+        let (pfg, pbg) = (self.pack(fg), self.pack(bg));
+        let bpp = self.bpp.min(4);
+        let w = w.min(self.info.width - x);
+        let rows = h.min(self.info.height - y);
+        let max_x = ((sw - 1) * 256) as i32;
+        let max_y = ((sh - 1) * 256) as i32;
+        for dy in 0..rows {
+            // source row in 24.8 fixed point, sampled at the pixel centre
+            let fy = ((((2 * dy + 1) * sh * 128) / h) as i32 - 128).clamp(0, max_y);
+            let (y0, ty) = ((fy >> 8) as usize, (fy & 255) as u32);
+            let y1 = (y0 + 1).min(sh - 1);
+            let off = (y + dy) * self.pitch + x * self.bpp;
+            if off + w * self.bpp > self.back.len() {
                 break;
             }
-            for (col, ch) in entry.iter().enumerate() {
-                if col >= self.cols {
-                    break;
-                }
-                let px = col * CHAR_W;
-                let py = (screen_row - start) * CHAR_H;
-                if let Some(ref mut fb) = *fb_guard {
-                    crate::graphics::font::draw_char(fb, px, py, *ch as u8, self.fg, self.bg);
+            for dx in 0..w {
+                let fx = ((((2 * dx + 1) * sw * 128) / w.max(1)) as i32 - 128).clamp(0, max_x);
+                let (x0, tx) = ((fx >> 8) as usize, (fx & 255) as u32);
+                let x1 = (x0 + 1).min(sw - 1);
+                let top = alpha[y0][x0] as u32 * (256 - tx) + alpha[y0][x1] as u32 * tx;
+                let bottom = alpha[y1][x0] as u32 * (256 - tx) + alpha[y1][x1] as u32 * tx;
+                let a = (top * (256 - ty) + bottom * ty) >> 16;
+                let ia = 255 - a;
+                let d = &mut self.back[off + dx * self.bpp..off + dx * self.bpp + bpp];
+                for c in 0..bpp {
+                    d[c] = ((pfg[c] as u32 * a + pbg[c] as u32 * ia) / 255) as u8;
                 }
             }
         }
+        self.mark_dirty(y, y + rows);
     }
-
-    pub fn write_byte(&mut self, byte: u8) {
-        if !self.initialized {
-            return;
-        }
-
-        match byte {
-            b'\n' => {
-                self.col = 0;
-                self.row += 1;
-                if self.row >= self.rows {
-                    self.scroll_one_row();
-                }
-            }
-            b'\r' => {
-                self.col = 0;
-            }
-            b'\t' => {
-                self.col = (self.col + 8) & !7;
-            }
-            b'\u{8}' | b'\u{7f}' => {
-                if self.col > 0 {
-                    self.col -= 1;
-                    let col = self.col;
-                    let row = self.row;
-                    // the row may not exist yet (e.g. after a tab on a fresh line)
-                    if let Some(row_vec) = self.scrollback.get_mut(row) {
-                        if col < row_vec.len() {
-                            row_vec[col] = ' ';
-                        }
-                    }
-                    let px = col * CHAR_W;
-                    let py = row * CHAR_H;
-                    let mut fb_guard = FRAMEBUFFER.lock();
-                    if let Some(ref mut fb) = *fb_guard {
-                        crate::graphics::font::draw_char(fb, px, py, b' ', self.fg, self.bg);
-                    }
-                }
-            }
-            byte => {
-                if self.col >= self.cols {
-                    self.col = 0;
-                    self.row += 1;
-                }
-                if self.row >= self.rows {
-                    self.scroll_one_row();
-                }
-                // Ensure scrollback has enough rows
-                while self.scrollback.len() <= self.row {
-                    let mut line = alloc::vec::Vec::new();
-                    for _ in 0..self.cols {
-                        line.push(' ');
-                    }
-                    self.scrollback.push(line);
-                }
-                // Update scrollback: write the character at (col, row)
-                let col = self.col;
-                let row = self.row;
-                {
-                    let row_vec = &mut self.scrollback[row];
-                    if col < row_vec.len() {
-                        let bytes = row_vec.as_mut_slice();
-                        bytes[col] = byte as char;
-                    }
-                }
-                // Draw to framebuffer
-                let px = col * CHAR_W;
-                let py = row * CHAR_H;
-                let fg = self.fg;
-                let bg = self.bg;
-                let mut fb_guard = FRAMEBUFFER.lock();
-                if let Some(ref mut fb) = *fb_guard {
-                    crate::graphics::font::draw_char(fb, px, py, byte, fg, bg);
-                }
-                self.col += 1;
-            }
-        }
-    }
-
-    pub fn write_str(&mut self, s: &str) {
-        for byte in s.bytes() {
-            self.write_byte(byte);
-        }
-    }
-}
-
-impl core::fmt::Write for FbConsole {
-    fn write_str(&mut self, s: &str) -> core::fmt::Result {
-        self.write_str(s);
-        Ok(())
-    }
-}
-
-/// Print to the framebuffer console.
-#[macro_export]
-macro_rules! fb_print {
-    ($($arg:tt)*) => {
-        $crate::graphics::framebuffer::_fb_print(format_args!($($arg)*))
-    };
-}
-
-/// Print to the framebuffer console, appending a newline.
-#[macro_export]
-macro_rules! fb_println {
-    () => ($crate::fb_print!("\n"));
-    ($fmt:expr) => ($crate::fb_print!(concat!($fmt, "\n")));
-    ($fmt:expr, $($arg:tt)*) => ($crate::fb_print!(
-        concat!($fmt, "\n"), $($arg)*));
-}
-
-#[doc(hidden)]
-pub fn _fb_print(args: core::fmt::Arguments) {
-    use core::fmt::Write;
-    use x86_64::instructions::interrupts;
-    interrupts::without_interrupts(|| {
-        CONSOLE.lock().write_fmt(args).unwrap();
-    });
 }

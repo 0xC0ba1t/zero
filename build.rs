@@ -1,3 +1,4 @@
+use bootloader_boot_config::{BootConfig, LevelFilter};
 use std::path::PathBuf;
 
 fn main() {
@@ -6,15 +7,26 @@ fn main() {
 
     let out_dir = PathBuf::from(std::env::var_os("OUT_DIR").unwrap());
 
+    // Ask for a big framebuffer (UEFI honors this; the BIOS loader stops at
+    // 1280x720) and keep the bootloader's own log off the screen so boot goes
+    // straight to the kernel.
+    let mut config = BootConfig::default();
+    config.frame_buffer.minimum_framebuffer_width = Some(1920);
+    config.frame_buffer.minimum_framebuffer_height = Some(1080);
+    config.frame_buffer_logging = false;
+    config.log_level = LevelFilter::Info;
+
     // Create BIOS disk image using DiskImageBuilder
     let bios_path = out_dir.join("bios.img");
     bootloader::DiskImageBuilder::new(kernel.clone())
+        .set_boot_config(&config)
         .create_bios_image(&bios_path)
         .expect("Failed to create BIOS disk image");
 
     // Create UEFI disk image
     let uefi_path = out_dir.join("uefi.img");
     bootloader::DiskImageBuilder::new(kernel)
+        .set_boot_config(&config)
         .create_uefi_image(&uefi_path)
         .expect("Failed to create UEFI disk image");
 

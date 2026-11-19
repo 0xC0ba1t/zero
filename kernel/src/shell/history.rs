@@ -5,7 +5,7 @@ use alloc::vec::Vec;
 use spin::Mutex;
 
 /// How many lines are remembered.
-const MAX_ENTRIES: usize = 16;
+const MAX_ENTRIES: usize = 128;
 
 /// The shell's history, shared with the `history` command.
 pub static HISTORY: Mutex<History> = Mutex::new(History::new());
