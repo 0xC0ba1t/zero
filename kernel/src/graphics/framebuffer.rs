@@ -1,5 +1,5 @@
 use crate::graphics::display::Display;
-use bootloader_api::info::FrameBufferInfo;
+use bootloader_api::info::{FrameBufferInfo, PixelFormat};
 use spin::Mutex;
 
 pub static FRAMEBUFFER: Mutex<Option<Framebuffer>> = Mutex::new(None);
@@ -21,10 +21,19 @@ impl Display for Framebuffer {
             let pixel_offset = y * self.info.stride + x;
             let bytes_per_pixel = self.info.bytes_per_pixel;
             let byte_offset = pixel_offset * bytes_per_pixel;
-            if byte_offset + bytes_per_pixel <= self.buffer.len() {
-                let color_bytes = color.to_le_bytes();
-                self.buffer[byte_offset..byte_offset + bytes_per_pixel]
-                    .copy_from_slice(&color_bytes[..bytes_per_pixel]);
+            // `color` is 0x00RRGGBB; lay the channels out the way the
+            // bootloader says the screen expects them.
+            let r = (color >> 16) as u8;
+            let g = (color >> 8) as u8;
+            let b = color as u8;
+            let pixel: [u8; 4] = match self.info.pixel_format {
+                PixelFormat::Rgb => [r, g, b, 0],
+                PixelFormat::U8 => [((r as u16 + g as u16 + b as u16) / 3) as u8, 0, 0, 0],
+                _ => [b, g, r, 0],
+            };
+            let len = bytes_per_pixel.min(pixel.len());
+            if len > 0 && byte_offset + len <= self.buffer.len() {
+                self.buffer[byte_offset..byte_offset + len].copy_from_slice(&pixel[..len]);
             }
         }
     }
@@ -84,8 +93,8 @@ impl FbConsole {
             let mut fb_guard = FRAMEBUFFER.lock();
             if let Some(ref mut fb) = *fb_guard {
                 fb.clear();
-                cols = fb.width() / CHAR_W;
-                rows = fb.height() / CHAR_H;
+                cols = (fb.width() / CHAR_W).max(1);
+                rows = (fb.height() / CHAR_H).max(1);
             } else {
                 cols = 80;
                 rows = 30;
@@ -104,7 +113,7 @@ impl FbConsole {
             let mut fb_guard = FRAMEBUFFER.lock();
             if let Some(ref mut fb) = *fb_guard {
                 fb.clear();
-                (fb.width() / CHAR_W, fb.height() / CHAR_H)
+                ((fb.width() / CHAR_W).max(1), (fb.height() / CHAR_H).max(1))
             } else {
                 (80, 30)
             }
@@ -149,9 +158,6 @@ impl FbConsole {
 
     pub fn scroll_up(&mut self) {
         // Scroll the visible window up by one row in the scrolback buffer
-        if self.scrollback.len() > self.rows {
-            self.scrollback.drain(0..1);
-        }
         self.redraw();
     }
 
@@ -194,6 +200,19 @@ impl FbConsole {
         }
     }
 
+    /// Drops the top text row, keeps the cursor on the last row and redraws.
+    ///
+    /// Rows are created lazily, so the scrollback can be shorter than the
+    /// screen (e.g. after several blank lines); draining an empty `Vec`
+    /// would panic, hence the check.
+    fn scroll_one_row(&mut self) {
+        if !self.scrollback.is_empty() {
+            self.scrollback.remove(0);
+        }
+        self.row = self.rows.saturating_sub(1);
+        self.redraw();
+    }
+
     /// Redraw the entire visible region from scrollback.
     fn redraw(&mut self) {
         let mut fb_guard = FRAMEBUFFER.lock();
@@ -232,9 +251,7 @@ impl FbConsole {
                 self.col = 0;
                 self.row += 1;
                 if self.row >= self.rows {
-                    self.scrollback.drain(0..1);
-                    self.row = self.rows - 1;
-                    self.redraw();
+                    self.scroll_one_row();
                 }
             }
             b'\r' => {
@@ -248,9 +265,11 @@ impl FbConsole {
                     self.col -= 1;
                     let col = self.col;
                     let row = self.row;
-                    let row_vec = &mut self.scrollback[row];
-                    if col < row_vec.len() {
-                        row_vec[col] = ' ';
+                    // the row may not exist yet (e.g. after a tab on a fresh line)
+                    if let Some(row_vec) = self.scrollback.get_mut(row) {
+                        if col < row_vec.len() {
+                            row_vec[col] = ' ';
+                        }
                     }
                     let px = col * CHAR_W;
                     let py = row * CHAR_H;
@@ -266,10 +285,7 @@ impl FbConsole {
                     self.row += 1;
                 }
                 if self.row >= self.rows {
-                    // Scroll: drop oldest scrollback row and redraw
-                    self.scrollback.drain(0..1);
-                    self.row = self.rows - 1;
-                    self.redraw();
+                    self.scroll_one_row();
                 }
                 // Ensure scrollback has enough rows
                 while self.scrollback.len() <= self.row {

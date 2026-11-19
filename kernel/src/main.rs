@@ -14,9 +14,8 @@ use core::panic::PanicInfo;
 pub static BOOTLOADER_CONFIG: BootloaderConfig = {
     let mut config = BootloaderConfig::new_default();
     config.mappings.physical_memory = Some(Mapping::Dynamic);
-    // The default stack size (80 KiB) is insufficient for lazy_static!
-    // initializers like WRITER (which allocates ~48 KiB for a logical scrollback
-    // buffer on the stack). Increase to 256 KiB to avoid stack overflow.
+    // The default stack size (80 KiB) is tight for the console redraw and the
+    // script VM, so give the kernel a 256 KiB stack.
     config.kernel_stack_size = 256 * 1024;
     config
 };
@@ -66,14 +65,16 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     *zero::fs::FILESYSTEM.lock() = Some(zero::fs::Filesystem::new());
     serial_println!("[kernel] filesystem initialized");
 
-    // Unmask only keyboard IRQ (IRQ1, bit 1) for now.
-    // Keep timer masked to avoid issues during boot screen.
-    // 0xFD = 11111101 — unmask only IRQ1
-    serial_println!("[kernel] unmasking keyboard IRQ");
-    unsafe {
-        zero::interrupts::PICS.lock().write_masks(0xFD, 0xFF);
-    }
-    serial_println!("[kernel] keyboard IRQ unmasked");
+    // Unmask the timer (IRQ0) and keyboard (IRQ1) interrupts.
+    // 0xFC = 11111100. The timer has to run: `sleep`, `uptime` and every
+    // script that animates wait on the tick counter it advances.
+    // Interrupts are disabled while the PIC lock is held, otherwise the timer
+    // handler (which also takes the lock to send EOI) could deadlock on it.
+    serial_println!("[kernel] unmasking timer and keyboard IRQs");
+    x86_64::instructions::interrupts::without_interrupts(|| unsafe {
+        zero::interrupts::PICS.lock().write_masks(0xFC, 0xFF);
+    });
+    serial_println!("[kernel] timer and keyboard IRQs unmasked");
 
     // Render the full boot screen to the framebuffer
     boot_screen();

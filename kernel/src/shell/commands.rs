@@ -189,13 +189,17 @@ pub static COMMANDS: &[Command] = &[
 
 fn cube_demo(args: &[String]) -> Result<(), CommandError> {
     expect_no_args(args)?;
-    let mut fb = crate::graphics::framebuffer::FRAMEBUFFER.lock();
-    if let Some(ref mut display) = *fb {
-        crate::graphics::demo::run_demo(display);
-        Ok(())
-    } else {
-        Err(CommandError::Failed("graphics not initialized"))
+    {
+        let mut fb = crate::graphics::framebuffer::FRAMEBUFFER.lock();
+        match *fb {
+            Some(ref mut display) => crate::graphics::demo::run_demo(display),
+            None => return Err(CommandError::Failed("graphics not initialized")),
+        }
     }
+    // The demo drew straight onto the screen; wipe it (the lock above is
+    // released, `clear` needs it) so the prompt doesn't print over the cube.
+    crate::graphics::framebuffer::CONSOLE.lock().clear();
+    Ok(())
 }
 
 /// Looks up a command by name.
@@ -516,7 +520,9 @@ fn edit(args: &[String]) -> Result<(), CommandError> {
                     lines.insert(cursor_y + 1, split);
                     cursor_y += 1;
                     cursor_x = 0;
-                } else {
+                } else if c.is_ascii() && !c.is_ascii_control() {
+                    // ASCII only: `cursor_x` is a byte index into the line, so a
+                    // multi-byte char would make later edits panic.
                     lines[cursor_y].insert(cursor_x, c);
                     cursor_x += 1;
                 }
