@@ -165,7 +165,8 @@ pub fn run(w: i32, h: i32) {
     let mut st = UiState::default();
     let mut step = 0usize;
     let mut step_at = crate::time::uptime_ms();
-    let mut name = crate::settings::get("name").unwrap_or_default();
+    // always start empty: an old saved name must not be typed into
+    let mut name = String::new();
     let mut wall = 0usize;
     let mut speed: i32 = 6;
     buddy::set_context(buddy::Context::Onboarding);
