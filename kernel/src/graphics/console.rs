@@ -16,6 +16,7 @@ use crate::graphics::ui;
 use crate::graphics::vga::{self, BACKGROUND, PALETTE};
 use alloc::collections::VecDeque;
 use alloc::vec::Vec;
+use core::cell::RefCell;
 use core::fmt;
 use spin::Mutex;
 
@@ -72,6 +73,10 @@ pub struct FbConsole {
     esc: Esc,
     params: [u16; 4],
     nparams: usize,
+    /// Rendered glyphs (character and colors to ready-to-copy pixels), made on first use.
+    tiles: RefCell<Vec<Option<Vec<u8>>>>,
+    /// When the screen last scrolled (milliseconds), to animate only slow output.
+    last_scroll: u64,
 }
 
 impl FbConsole {
@@ -98,6 +103,8 @@ impl FbConsole {
             esc: Esc::None,
             params: [0; 4],
             nparams: 0,
+            tiles: RefCell::new(Vec::new()),
+            last_scroll: 0,
         }
     }
 
@@ -118,6 +125,7 @@ impl FbConsole {
             self.cols = (fb.width().saturating_sub(2 * self.pad_x) / self.cell_w).max(1);
             self.rows = (self.area_h.saturating_sub(6) / self.cell_h).max(1);
             self.initialized = true;
+            self.tiles.borrow_mut().clear();
             self.clear_fb(fb);
             self.finish(fb);
         }
@@ -199,6 +207,10 @@ impl FbConsole {
         }
         if let Some(fb) = FRAMEBUFFER.lock().as_mut() {
             self.erase_cursor(fb);
+            let diff = wanted as isize - self.view_back as isize;
+            if diff.abs() <= 60 {
+                self.animate_view(fb, diff);
+            }
             self.view_back = wanted;
             self.redraw(fb);
             self.finish(fb);
@@ -290,6 +302,21 @@ impl FbConsole {
     }
 
     fn paint(&self, fb: &mut Framebuffer, col: usize, row: usize, cell: Cell, inverse: bool) {
+        let x = self.pad_x + col * self.cell_w;
+        let y = self.oy + row * self.cell_h;
+        self.paint_at(fb, x, y, cell, inverse);
+    }
+
+    /// Paints a whole stored line with its top at pixel row `y`.
+    fn paint_line_at(&self, fb: &mut Framebuffer, index: usize, y: usize) {
+        for (c, &cell) in self.lines[index].iter().enumerate() {
+            if cell != BLANK {
+                self.paint_at(fb, self.pad_x + c * self.cell_w, y, cell, false);
+            }
+        }
+    }
+
+    fn paint_at(&self, fb: &mut Framebuffer, x: usize, y: usize, cell: Cell, inverse: bool) {
         let ch = cell as u8;
         let attr = (cell >> 8) as u8;
         let (fg, bg) = (attr & 0x0F, attr >> 4);
@@ -299,10 +326,22 @@ impl FbConsole {
             fg = BACKGROUND;
             bg = ui::ACCENT;
         }
-        let x = self.pad_x + col * self.cell_w;
-        let y = self.oy + row * self.cell_h;
         match ch {
             0 | b' ' => fb.fill_rect(x, y, self.cell_w, self.cell_h, bg),
+            0x21..=0x7E if !inverse => {
+                // a finished glyph for this character and color, copied row by row
+                let key = (ch as usize - 0x21) * 256 + attr as usize;
+                let mut tiles = self.tiles.borrow_mut();
+                if tiles.is_empty() {
+                    tiles.resize(94 * 256, None);
+                }
+                if tiles[key].is_none() {
+                    tiles[key] = Some(fb.make_tile(self.cell_w, self.cell_h, 1, self.font.raster(ch as char), fg, bg));
+                }
+                if let Some(tile) = tiles[key].as_ref() {
+                    fb.blit_tile(x, y, self.cell_w, self.cell_h, tile);
+                }
+            }
             0x21..=0x7E => {
                 fb.fill_rect(x, y, self.cell_w, 1, bg);
                 fb.fill_rect(x, y + self.cell_h - 1, self.cell_w, 1, bg);
@@ -310,6 +349,38 @@ impl FbConsole {
             }
             _ => vga::draw_cell(fb, x, y, self.cell_w, self.cell_h, ch, fg, bg, &self.font),
         }
+    }
+
+    /// Slides the view by `diff` lines (positive: towards older output), one
+    /// line at a time in a few pixel steps. The line coming into view is painted
+    /// clipped to the console window, so it appears to slide in from the edge.
+    fn animate_view(&mut self, fb: &mut Framebuffer, diff: isize) {
+        let region = self.rows * self.cell_h;
+        let width = fb.width();
+        fb.set_clip(0, self.oy, width, region);
+        let step = (self.cell_h + 2) / 3;
+        let mut back = self.view_back;
+        for _ in 0..diff.unsigned_abs() {
+            let first = self.lines.len() - self.rows - back;
+            let mut moved = 0;
+            while moved < self.cell_h {
+                let d = step.min(self.cell_h - moved);
+                moved += d;
+                if diff > 0 {
+                    fb.scroll_rect_down(self.oy, region, d, BACKGROUND);
+                    if self.oy + moved >= self.cell_h {
+                        self.paint_line_at(fb, first - 1, self.oy + moved - self.cell_h);
+                    }
+                } else {
+                    fb.scroll_rect_up(self.oy, region, d, BACKGROUND);
+                    self.paint_line_at(fb, first + self.rows, self.oy + region - moved);
+                }
+                fb.flush();
+                pause_ms(2);
+            }
+            back = if diff > 0 { back + 1 } else { back - 1 };
+        }
+        fb.clear_clip();
     }
 
     /// Repaints the whole screen from the stored cells.
@@ -337,7 +408,24 @@ impl FbConsole {
         if self.lines.len() > MAX_LINES {
             self.lines.pop_front();
         }
-        fb.scroll_rect_up(self.oy, self.rows * self.cell_h, self.cell_h, BACKGROUND);
+        // Output that trickles in (a line after pressing enter) scrolls smoothly,
+        // in a few steps; a burst of lines just jumps so it stays fast.
+        let now = crate::time::uptime_ms();
+        let region = self.rows * self.cell_h;
+        if now.saturating_sub(self.last_scroll) > 150 {
+            let step = (self.cell_h + 3) / 4;
+            let mut moved = 0;
+            while moved < self.cell_h {
+                let d = step.min(self.cell_h - moved);
+                fb.scroll_rect_up(self.oy, region, d, BACKGROUND);
+                fb.flush();
+                moved += d;
+                pause_ms(3);
+            }
+        } else {
+            fb.scroll_rect_up(self.oy, region, self.cell_h, BACKGROUND);
+        }
+        self.last_scroll = crate::time::uptime_ms();
     }
 
     fn newline(&mut self, fb: &mut Framebuffer) {
@@ -580,4 +668,13 @@ macro_rules! emergency_println {
         format_args!(concat!($fmt, "\n"))));
     ($fmt:expr, $($arg:tt)*) => ($crate::graphics::console::_fb_emergency_print(
         format_args!(concat!($fmt, "\n"), $($arg)*)));
+}
+
+/// Waits a few milliseconds without relying on interrupts (printing runs
+/// with them off), using the calibrated timestamp counter.
+fn pause_ms(ms: u64) {
+    let end = crate::time::uptime_ms() + ms;
+    while crate::time::uptime_ms() < end {
+        core::hint::spin_loop();
+    }
 }

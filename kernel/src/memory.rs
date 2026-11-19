@@ -115,3 +115,7 @@ unsafe impl FrameAllocator<Size4KiB> for BootInfoFrameAllocator {
         }
     }
 }
+
+/// Where all physical memory is mapped in virtual memory (set at boot); drivers
+/// that hand physical addresses to hardware use it to look pages up.
+pub static PHYS_OFFSET: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);

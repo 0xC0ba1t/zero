@@ -35,32 +35,32 @@ pub static PROGRAMS: &[Entry] = &[
     },
     Entry {
         name: "pong",
-        about: "pong against the computer (w/s or arrows, q quits)",
+        about: "pong with smooth paddles and a difficulty setting",
         source: include_str!("../../../programs/pong.zs"),
     },
     Entry {
         name: "tictactoe",
-        about: "tic tac toe against the computer (w/s/a/d or arrows, enter to mark, q quits)",
+        about: "tic tac toe; the hard computer plays perfectly",
         source: include_str!("../../../programs/tictactoe.zs"),
     },
     Entry {
         name: "snake",
-        about: "classic snake arcade game (w/a/s/d or arrows, q quits)",
+        about: "snake with three difficulty levels",
         source: include_str!("../../../programs/snake.zs"),
     },
     Entry {
         name: "invaders",
-        about: "space invaders defender game (a/d or arrows, space to shoot, q quits)",
+        about: "space invaders: bunkers, a saucer, waves, 3 levels",
         source: include_str!("../../../programs/space_invaders.zs"),
     },
     Entry {
         name: "calculator",
-        about: "interactive grid calculator (w/a/s/d or arrows, enter to press)",
+        about: "a calculator you can type into or point and press",
         source: include_str!("../../../programs/calculator.zs"),
     },
     Entry {
         name: "connect4",
-        about: "connect four against the computer (a/d to choose column, enter to drop)",
+        about: "connect four against a computer that looks ahead",
         source: include_str!("../../../programs/connect_four.zs"),
     },
 ];

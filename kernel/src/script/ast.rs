@@ -32,6 +32,8 @@ pub enum Func {
     Key,
     GetKey,
     Ticks,
+    /// `down(key)`: 1 while the key is held down.
+    Down,
 }
 
 /// An expression. Variables are resolved to slot numbers while compiling.
@@ -43,6 +45,8 @@ pub enum Expr {
     Not(Box<Expr>),
     Bin(BinOp, Box<Expr>, Box<Expr>),
     Call(Func, Vec<Expr>),
+    /// `array[index]`
+    Index(usize, Box<Expr>),
 }
 
 /// One piece of what `print` and `text` output.
@@ -63,6 +67,14 @@ pub enum Stmt {
     Text(Expr, Expr, Vec<Item>),
     /// `plot x, y, char`
     Plot(Expr, Expr, Expr),
+    /// `array[index] = value`
+    AssignIndex(usize, Expr, Expr),
+    /// `emote n`: tells the buddy how the game is going (1 score, 2 hurt, 3 win, 4 danger, 5 lose)
+    Emote(Expr),
+    /// `rect x, y, w, h`: a filled rectangle in pixels (the screen is 640x400)
+    Rect(Expr, Expr, Expr, Expr),
+    /// `disc x, y, r`: a filled circle in pixels
+    Disc(Expr, Expr, Expr),
     Cls,
     Color(Expr),
     Sleep(Expr),
@@ -95,4 +107,6 @@ pub struct Program {
     pub names: Vec<String>,
     /// Initial values of the first slots (the predefined constants).
     pub constants: Vec<i32>,
+    /// Arrays: name and length.
+    pub arrays: Vec<(String, usize)>,
 }

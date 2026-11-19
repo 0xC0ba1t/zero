@@ -9,9 +9,12 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 /// Variables that exist before the script starts. They take the first slots.
-const CONSTANTS: [(&str, i32); 6] = [
+const CONSTANTS: [(&str, i32); 9] = [
     ("UP", 256),
     ("DOWN", 257),
+    ("LEFT", 258),
+    ("RIGHT", 259),
+    ("SPACE", 32),
     ("ENTER", 10),
     ("ESC", 27),
     ("WIDTH", 80),
@@ -19,9 +22,9 @@ const CONSTANTS: [(&str, i32); 6] = [
 ];
 
 /// Words that cannot be used as variable names.
-const KEYWORDS: [&str; 15] = [
+const KEYWORDS: [&str; 19] = [
     "let", "print", "text", "plot", "cls", "color", "sleep", "if", "else", "while", "end", "sub",
-    "call", "return", "exit",
+    "call", "return", "exit", "dim", "rect", "disc", "emote",
 ];
 
 fn is_keyword(name: &str) -> bool {
@@ -42,6 +45,8 @@ struct Compiler {
     /// the source line of every statement
     lines: Vec<usize>,
     blocks: Vec<Block>,
+    /// every array with its length
+    arrays: Vec<(String, usize)>,
     /// every sub with the index of its first statement
     subs: Vec<(String, usize)>,
     /// `call` statements waiting for their sub: (statement, name, line)
@@ -59,6 +64,7 @@ impl Compiler {
             stmts: Vec::new(),
             lines: Vec::new(),
             blocks: Vec::new(),
+            arrays: Vec::new(),
             subs: Vec::new(),
             calls: Vec::new(),
             toks: Vec::new(),
@@ -244,6 +250,13 @@ impl Compiler {
             self.pos += 1;
             return self.call_args(name);
         }
+        if self.peek() == Some(&Token::LBracket) {
+            let array = self.array_id(&name)?;
+            self.pos += 1;
+            let index = self.expr()?;
+            self.expect(&Token::RBracket, "]")?;
+            return Ok(Expr::Index(array, Box::new(index)));
+        }
         let slot = self.intern(&name);
         Ok(Expr::Var(slot))
     }
@@ -258,6 +271,7 @@ impl Compiler {
             "key" => (Func::Key, 0),
             "getkey" => (Func::GetKey, 0),
             "ticks" => (Func::Ticks, 0),
+            "down" => (Func::Down, 1),
             _ => return Err(self.error(&format!("unknown function '{}'", name))),
         };
 
@@ -302,6 +316,14 @@ impl Compiler {
     }
 
     // ---- statements ----
+
+    /// The id of a declared array.
+    fn array_id(&self, name: &str) -> Result<usize, ScriptError> {
+        self.arrays
+            .iter()
+            .position(|(existing, _)| existing == name)
+            .ok_or_else(|| self.error(&format!("no array named '{}' (declare it with dim)", name)))
+    }
 
     /// Compiles `name = expr`; the name and the `=` are already consumed.
     fn assign(&mut self, name: String) -> Result<(), ScriptError> {
@@ -444,6 +466,51 @@ impl Compiler {
                 self.emit(Stmt::Exit);
                 Ok(())
             }
+            "dim" => {
+                // dim name[size]: only exists at compile time
+                let name = self.expect_ident("an array name")?;
+                if is_keyword(&name) || self.names.contains(&name) || self.arrays.iter().any(|(n, _)| *n == name) {
+                    return Err(self.error(&format!("'{}' is already used", name)));
+                }
+                self.expect(&Token::LBracket, "[")?;
+                let size = match self.peek().cloned() {
+                    Some(Token::Num(size)) if size > 0 && size <= 65536 => size as usize,
+                    _ => return Err(self.error("an array size from 1 to 65536 is expected")),
+                };
+                self.pos += 1;
+                self.expect(&Token::RBracket, "]")?;
+                self.end_of_statement()?;
+                self.arrays.push((name, size));
+                Ok(())
+            }
+            "rect" => {
+                let x = self.expr()?;
+                self.expect(&Token::Comma, ",")?;
+                let y = self.expr()?;
+                self.expect(&Token::Comma, ",")?;
+                let w = self.expr()?;
+                self.expect(&Token::Comma, ",")?;
+                let h = self.expr()?;
+                self.end_of_statement()?;
+                self.emit(Stmt::Rect(x, y, w, h));
+                Ok(())
+            }
+            "emote" => {
+                let code = self.expr()?;
+                self.end_of_statement()?;
+                self.emit(Stmt::Emote(code));
+                Ok(())
+            }
+            "disc" => {
+                let x = self.expr()?;
+                self.expect(&Token::Comma, ",")?;
+                let y = self.expr()?;
+                self.expect(&Token::Comma, ",")?;
+                let r = self.expr()?;
+                self.end_of_statement()?;
+                self.emit(Stmt::Disc(x, y, r));
+                Ok(())
+            }
             "cls" => {
                 self.end_of_statement()?;
                 self.emit(Stmt::Cls);
@@ -482,7 +549,18 @@ impl Compiler {
                 Ok(())
             }
             _ => {
-                if self.peek() == Some(&Token::Eq) {
+                if self.peek() == Some(&Token::LBracket) {
+                    // array[index] = value
+                    let array = self.array_id(&word)?;
+                    self.pos += 1;
+                    let index = self.expr()?;
+                    self.expect(&Token::RBracket, "]")?;
+                    self.expect(&Token::Eq, "=")?;
+                    let value = self.expr()?;
+                    self.end_of_statement()?;
+                    self.emit(Stmt::AssignIndex(array, index, value));
+                    Ok(())
+                } else if self.peek() == Some(&Token::Eq) {
                     self.pos += 1;
                     // `word` is still borrowed by the match above, so hand over a copy
                     self.assign(word.clone())
@@ -525,6 +603,7 @@ impl Compiler {
             lines: self.lines,
             names: self.names,
             constants: CONSTANTS.iter().map(|constant| constant.1).collect(),
+            arrays: self.arrays,
         })
     }
 }

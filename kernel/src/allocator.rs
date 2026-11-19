@@ -9,7 +9,7 @@ use x86_64::{
 };
 
 pub const HEAP_START: usize = 0x_4444_4444_0000;
-pub const HEAP_SIZE: usize = 48 * 1024 * 1024; // 48 MiB: shadow framebuffer + scrollback + programs
+pub const HEAP_SIZE: usize = 96 * 1024 * 1024; // 96 MiB: shadow framebuffer(s) + scrollback + programs + Doom
 
 #[global_allocator]
 static ALLOCATOR: LockedHeap = LockedHeap::empty();

@@ -44,6 +44,10 @@ pub struct KernelHost {
     area_y: usize,
     area_h: usize,
     font: Font,
+    /// When the screen was last pushed to the display (milliseconds since boot).
+    last_flush: u64,
+    /// The text on the right of the status bar of the script screen.
+    status_right: String,
 }
 
 impl KernelHost {
@@ -63,6 +67,8 @@ impl KernelHost {
             area_y: 0,
             area_h: 0,
             font: Font::console(),
+            last_flush: 0,
+            status_right: String::new(),
         }
     }
 
@@ -78,6 +84,7 @@ impl KernelHost {
             return;
         }
         let mut geometry = None;
+        let mut status = String::new();
         let title = self.title.clone();
         framebuffer::with(|fb| {
             let (w, h) = (fb.width(), fb.height());
@@ -95,7 +102,9 @@ impl KernelHost {
             let info = alloc::format!("{}x{} cells of {}x{} px", COLS, ROWS, cw, ch);
             ui::draw_status(fb, &lay, "script", &info);
             fb.flush();
+            status = info;
         });
+        self.status_right = status;
         if let Some((cw, ch, ox, oy, area_y, area_h)) = geometry {
             self.area_y = area_y;
             self.area_h = area_h;
@@ -133,10 +142,16 @@ impl KernelHost {
         framebuffer::with(|fb| self.paint(fb, x, y));
     }
 
-    fn flush(&self) {
+    fn flush(&mut self) {
         if self.graphics {
             framebuffer::with(|fb| fb.flush());
         }
+        self.last_flush = time::uptime_ms();
+    }
+
+    /// Pixels per script pixel: the script screen is 640x400 and covers the cell grid.
+    fn to_screen(&self, v: i32) -> i64 {
+        v as i64 * (COLS * self.cell_w) as i64 / 640
     }
 }
 
@@ -251,12 +266,66 @@ impl Host for KernelHost {
     }
 
     fn ticks(&mut self) -> u64 {
-        self.flush();
         time::uptime_ms()
     }
 
+    fn rect(&mut self, x: i32, y: i32, w: i32, h: i32) {
+        self.enter_graphics();
+        let (x0, y0) = (self.to_screen(x), self.to_screen(y));
+        let (x1, y1) = (self.to_screen(x + w), self.to_screen(y + h));
+        if x1 <= x0 || y1 <= y0 {
+            return;
+        }
+        let (ox, oy) = (self.origin_x as i64, self.origin_y as i64);
+        let color = PALETTE[self.color as usize & 15];
+        framebuffer::with(|fb| {
+            let (sx, sy) = ((ox + x0).max(0), (oy + y0).max(0));
+            let (ex, ey) = ((ox + x1).max(0), (oy + y1).max(0));
+            if ex > sx && ey > sy {
+                fb.fill_rect(sx as usize, sy as usize, (ex - sx) as usize, (ey - sy) as usize, color);
+            }
+        });
+    }
+
+    fn disc(&mut self, x: i32, y: i32, r: i32) {
+        self.enter_graphics();
+        let (cx, cy) = (self.to_screen(x) + self.origin_x as i64, self.to_screen(y) + self.origin_y as i64);
+        let radius = self.to_screen(r).max(1);
+        let color = PALETTE[self.color as usize & 15];
+        framebuffer::with(|fb| {
+            for dy in -radius..=radius {
+                let span = isqrt(radius * radius - dy * dy);
+                let (sx, sy) = (cx - span, cy + dy);
+                if sx >= 0 && sy >= 0 {
+                    fb.fill_rect(sx as usize, sy as usize, (2 * span + 1) as usize, 1, color);
+                }
+            }
+        });
+    }
+
+    fn key_down(&mut self, code: i32) -> bool {
+        input::key_down(code)
+    }
+
+    fn emote(&mut self, code: i32) {
+        use crate::graphics::buddy::{self, Event};
+        buddy::react(match code {
+            1 => Event::Score,
+            2 => Event::Hurt,
+            3 => Event::Win,
+            4 => Event::Danger,
+            _ => Event::Lose,
+        });
+    }
+
     fn interrupted(&mut self) -> bool {
-        self.flush();
+        // show what has been drawn at most every 16 ms, however many statements ran
+        if time::uptime_ms() >= self.last_flush + 16 {
+            self.flush();
+            if self.graphics {
+                ui::tick_buddy("script", &self.status_right);
+            }
+        }
         input::interrupt_requested()
     }
 }
@@ -278,4 +347,12 @@ fn test_script_runs_on_the_kernel_host() {
     }
     // dropping the host restored the color the script had changed
     assert_eq!(CONSOLE.lock().attr(), saved);
+}
+
+fn isqrt(n: i64) -> i64 {
+    let mut r = 0;
+    while (r + 1) * (r + 1) <= n {
+        r += 1;
+    }
+    r
 }

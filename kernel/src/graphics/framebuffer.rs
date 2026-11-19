@@ -47,6 +47,8 @@ pub struct Framebuffer {
     off_y: usize,
     /// For each physical column of the picture, the logical column it shows.
     x_map: Vec<u32>,
+    /// Drawing is limited to this rectangle: (x0, y0, x1, y1).
+    clip: (usize, usize, usize, usize),
     /// Rows `dirty_lo..dirty_hi` differ between the shadow buffer and the screen.
     dirty_lo: usize,
     dirty_hi: usize,
@@ -70,6 +72,7 @@ impl Framebuffer {
             off_x: 0,
             off_y: 0,
             x_map: Vec::new(),
+            clip: (0, 0, 0, 0),
             dirty_lo: 0,
             dirty_hi: 0,
         };
@@ -82,6 +85,7 @@ impl Framebuffer {
         let (pw, ph) = (self.info.width, self.info.height);
         self.width = w;
         self.height = h;
+        self.clip = (0, 0, w, h);
         self.pitch = w * self.bpp;
         self.back = vec![0u8; self.pitch * h];
         if w == pw && h == ph {
@@ -231,6 +235,33 @@ impl Framebuffer {
         self.scroll_rect_up(0, h, dy, fill);
     }
 
+    /// Limits all drawing to a rectangle (until [`Framebuffer::clear_clip`]).
+    pub fn set_clip(&mut self, x: usize, y: usize, w: usize, h: usize) {
+        self.clip = (x.min(self.width), y.min(self.height), (x + w).min(self.width), (y + h).min(self.height));
+    }
+
+    /// Lets drawing reach the whole screen again.
+    pub fn clear_clip(&mut self) {
+        self.clip = (0, 0, self.width, self.height);
+    }
+
+    /// Scrolls the full-width band of `h` rows starting at row `y` down by `dy` rows,
+    /// filling the rows that open up at the top with `fill`.
+    pub fn scroll_rect_down(&mut self, y: usize, h: usize, dy: usize, fill: u32) {
+        if dy == 0 || y >= self.height {
+            return;
+        }
+        let h = h.min(self.height - y);
+        let w = self.width;
+        if dy >= h {
+            self.fill_rect(0, y, w, h, fill);
+            return;
+        }
+        self.back.copy_within(y * self.pitch..(y + h - dy) * self.pitch, (y + dy) * self.pitch);
+        self.fill_rect(0, y, w, dy, fill);
+        self.mark_dirty(y, y + h);
+    }
+
     /// Scrolls the full-width band of `h` rows starting at row `y` up by `dy` rows.
     pub fn scroll_rect_up(&mut self, y: usize, h: usize, dy: usize, fill: u32) {
         if dy == 0 || y >= self.height {
@@ -355,14 +386,19 @@ impl Framebuffer {
         let pfg = self.pack(fg);
         let pbg = self.pack(bg);
         let bpp = self.bpp;
-        let mut rows = 0;
+        let (cx0, cy0, cx1, cy1) = self.clip;
+        let (mut lo, mut hi) = (usize::MAX, 0);
         for (dy, row) in alpha.iter().enumerate() {
             let yy = y + dy;
-            if yy >= h {
+            if yy >= h.min(cy1) {
                 break;
             }
-            rows += 1;
-            let n = row.len().min(w.saturating_sub(x));
+            if yy < cy0 || x >= cx1 || x < cx0 {
+                continue;
+            }
+            lo = lo.min(yy);
+            hi = hi.max(yy + 1);
+            let n = row.len().min(w.min(cx1).saturating_sub(x));
             let off = yy * self.pitch + x * bpp;
             if off + n * bpp > self.back.len() {
                 break;
@@ -382,8 +418,8 @@ impl Framebuffer {
                 }
             }
         }
-        if rows > 0 {
-            self.mark_dirty(y, y + rows);
+        if lo < hi {
+            self.mark_dirty(lo, hi);
         }
     }
 
@@ -443,11 +479,13 @@ impl Display for Framebuffer {
     }
 
     fn fill_rect(&mut self, x: usize, y: usize, w: usize, h: usize, color: u32) {
-        if x >= self.width || y >= self.height || w == 0 || h == 0 {
+        let (cx0, cy0, cx1, cy1) = self.clip;
+        let (x0, y0) = (x.max(cx0), y.max(cy0));
+        let (x1, y1) = (x.saturating_add(w).min(cx1), y.saturating_add(h).min(cy1));
+        if x0 >= x1 || y0 >= y1 {
             return;
         }
-        let w = w.min(self.width - x);
-        let h = h.min(self.height - y);
+        let (x, y, w, h) = (x0, y0, x1 - x0, y1 - y0);
         let px = self.pack(color);
         // paint the first row, then copy it down
         self.fill_span(x, y, w, px);
@@ -501,6 +539,129 @@ fn store(d: &mut [u8], p: &[u8; 4], n: usize) {
             for i in 0..n {
                 d[i] = p[i];
             }
+        }
+    }
+}
+
+impl Framebuffer {
+    /// Renders a glyph over its background into ready-to-copy pixel bytes: a
+    /// `w` x `h` tile with the glyph's first row at row `top`.
+    pub fn make_tile(&self, w: usize, h: usize, top: usize, alpha: &[&[u8]], fg: u32, bg: u32) -> Vec<u8> {
+        let bpp = self.bpp;
+        let (pfg, pbg) = (self.pack(fg), self.pack(bg));
+        let n = bpp.min(4);
+        let mut tile = vec![0u8; w * h * bpp];
+        for px in tile.chunks_exact_mut(bpp) {
+            store(px, &pbg, n);
+        }
+        for (dy, row) in alpha.iter().enumerate() {
+            let yy = top + dy;
+            if yy >= h {
+                break;
+            }
+            for (dx, &a) in row.iter().enumerate().take(w) {
+                let a = a as u32;
+                if a == 0 {
+                    continue;
+                }
+                let d = &mut tile[(yy * w + dx) * bpp..(yy * w + dx) * bpp + n];
+                if a == 255 {
+                    store(d, &pfg, n);
+                } else {
+                    let ia = 255 - a;
+                    for c in 0..n {
+                        d[c] = ((pfg[c] as u32 * a + pbg[c] as u32 * ia) / 255) as u8;
+                    }
+                }
+            }
+        }
+        tile
+    }
+
+    /// Copies a tile made by [`Framebuffer::make_tile`] to `(x, y)`, one row at a time.
+    pub fn blit_tile(&mut self, x: usize, y: usize, w: usize, h: usize, tile: &[u8]) {
+        let bpp = self.bpp;
+        let (cx0, cy0, cx1, cy1) = self.clip;
+        let x0 = x.max(cx0);
+        let x1 = (x + w).min(cx1);
+        if x0 >= x1 {
+            return;
+        }
+        let (mut lo, mut hi) = (usize::MAX, 0);
+        for ry in 0..h {
+            let yy = y + ry;
+            if yy < cy0 || yy >= cy1 {
+                continue;
+            }
+            let src = (ry * w + (x0 - x)) * bpp;
+            let len = (x1 - x0) * bpp;
+            let off = yy * self.pitch + x0 * bpp;
+            if off + len > self.back.len() || src + len > tile.len() {
+                continue;
+            }
+            self.back[off..off + len].copy_from_slice(&tile[src..src + len]);
+            lo = lo.min(yy);
+            hi = hi.max(yy + 1);
+        }
+        if lo < hi {
+            self.mark_dirty(lo, hi);
+        }
+    }
+}
+
+impl Framebuffer {
+    /// Draws a `sw` x `sh` picture of 0x00RRGGBB pixels stretched into the
+    /// `dw` x `dh` rectangle at `(dx, dy)`. `columns` gives, for each of the
+    /// `dw` destination columns, the source column to take.
+    pub fn draw_pixels_scaled(&mut self, src: &[u32], sw: usize, sh: usize, dx: usize, dy: usize, dw: usize, dh: usize, columns: &[u32]) {
+        if src.len() < sw * sh || columns.len() < dw || dh == 0 {
+            return;
+        }
+        let bpp = self.bpp;
+        let rgb = self.info.pixel_format == PixelFormat::Rgb;
+        let (_, cy0, cx1, cy1) = self.clip;
+        let mut lo = usize::MAX;
+        let mut hi = 0;
+        for row in 0..dh {
+            let y = dy + row;
+            if y < cy0 || y >= cy1 {
+                continue;
+            }
+            let source = &src[(row * sh / dh) * sw..][..sw];
+            let off = y * self.pitch + dx * bpp;
+            let width = dw.min(cx1.saturating_sub(dx));
+            if off + width * bpp > self.back.len() {
+                break;
+            }
+            let dst = &mut self.back[off..off + width * bpp];
+            if bpp == 4 && !rgb {
+                for (d, &c) in dst.chunks_exact_mut(4).zip(columns.iter()) {
+                    let v = source[c as usize] & 0x00FF_FFFF;
+                    d[0] = v as u8;
+                    d[1] = (v >> 8) as u8;
+                    d[2] = (v >> 16) as u8;
+                    d[3] = 0;
+                }
+            } else {
+                for (d, &c) in dst.chunks_exact_mut(bpp).zip(columns.iter()) {
+                    let v = source[c as usize];
+                    let (r, g, b) = ((v >> 16) as u8, (v >> 8) as u8, v as u8);
+                    if rgb {
+                        d[0] = r;
+                        d[1] = g;
+                        d[2] = b;
+                    } else {
+                        d[0] = b;
+                        d[1] = g;
+                        d[2] = r;
+                    }
+                }
+            }
+            lo = lo.min(y);
+            hi = hi.max(y + 1);
+        }
+        if lo < hi {
+            self.mark_dirty(lo, hi);
         }
     }
 }

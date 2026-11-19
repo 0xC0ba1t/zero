@@ -14,7 +14,7 @@ use zero::serial_println;
 pub static BOOTLOADER_CONFIG: BootloaderConfig = {
     let mut config = BootloaderConfig::new_default();
     config.mappings.physical_memory = Some(Mapping::Dynamic);
-    config.kernel_stack_size = 256 * 1024;
+    config.kernel_stack_size = 1024 * 1024;
     config
 };
 
@@ -31,6 +31,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     zero::init();
 
     let phys_mem_offset = VirtAddr::new(boot_info.physical_memory_offset.into_option().unwrap_or(0));
+    zero::memory::PHYS_OFFSET.store(phys_mem_offset.as_u64(), core::sync::atomic::Ordering::SeqCst);
     let mut mapper = unsafe { memory::init(phys_mem_offset) };
     let mut frame_allocator = unsafe { BootInfoFrameAllocator::init(&boot_info.memory_regions) };
 
@@ -51,7 +52,13 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     }
     CONSOLE.lock().init();
 
-    *zero::fs::FILESYSTEM.lock() = Some(zero::fs::Filesystem::new());
+    // The data partition: saved files and settings live there.
+    let has_partition = zero::partition::init();
+    serial_println!("[kernel] {}", zero::partition::describe());
+    zero::settings::load();
+    let saved = if has_partition { zero::pfs::load() } else { None };
+    serial_println!("[kernel] saved file system: {}", if saved.is_some() { "restored" } else { "none" });
+    *zero::fs::FILESYSTEM.lock() = Some(saved.unwrap_or_else(zero::fs::Filesystem::new));
 
     // Timer (IRQ0) and keyboard (IRQ1). The PIC lock is taken with interrupts
     // off: the timer handler takes it too and would otherwise deadlock.
@@ -62,6 +69,10 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
 
     // Boot screen (animated) until a key is pressed, then the shell window.
     bootscreen::run();
+    // First time on this disk: the welcome tour.
+    if zero::partition::present() && !zero::onboard::seen() {
+        zero::onboard::run();
+    }
     CONSOLE.lock().init();
     zero::graphics::ui::restore_shell_screen();
 

@@ -1,318 +1,290 @@
-# zs interactive calculator with grid keypad
-# controls: w/a/s/d or arrows to move, ENTER or space to press, q to quit
+# calculator: whole numbers
+# type digits and + - * / directly, enter or = for the result, backspace to
+# delete a digit, c to clear. Or move over the keypad with the arrows (or
+# w/a/s/d) and press enter on a key. q quits.
 
-let cx = 0
-let cy = 0
-let running = 1
-let k = 0
-let i = 0
+dim kc[20]
+dim kw[20]
 
 let acc = 0
-let current_val = 0
+let cur = 0
 let op = 0
-let has_input = 0
-let error_state = 0
+let entering = 0
+let fresh = 1
+let err = 0
+let k = 0
+let cr = 1
+let cc = 0
+let running = 1
+let i = 0
+let r = 0
+let c = 0
+let n = 0
+let digits = 0
+let v = 0
+let x = 0
+let y = 0
+let w = 0
+let sel = 0
+let flash = 0
+let shown = 0
 
-sub draw_keypad
+# what each keypad button does, row by row (4 columns, 5 rows)
+sub init_keys
+  kc[0] = 'c' ; kc[1] = 8 ; kc[2] = 'n' ; kc[3] = '/'
+  kc[4] = '7' ; kc[5] = '8' ; kc[6] = '9' ; kc[7] = '*'
+  kc[8] = '4' ; kc[9] = '5' ; kc[10] = '6' ; kc[11] = '-'
+  kc[12] = '1' ; kc[13] = '2' ; kc[14] = '3' ; kc[15] = '+'
+  kc[16] = '0' ; kc[17] = '0' ; kc[18] = '=' ; kc[19] = '='
+end
+
+# apply the pending operator: acc = acc op cur
+sub compute
+  if op == '+'
+    acc = acc + cur
+  end
+  if op == '-'
+    acc = acc - cur
+  end
+  if op == '*'
+    acc = acc * cur
+  end
+  if op == '/'
+    if cur == 0
+      err = 1
+    else
+      acc = acc / cur
+    end
+  end
+end
+
+# a key press: a digit, an operator, '=', 'c' (clear), 8 (backspace) or 'n' (negate)
+sub press
+  if k == 'c'
+    acc = 0
+    cur = 0
+    op = 0
+    entering = 0
+    fresh = 1
+    err = 0
+    return
+  end
+  if err
+    return
+  end
+  if k >= '0' && k <= '9'
+    if fresh
+      cur = 0
+      fresh = 0
+    end
+    if abs(cur) < 100000000
+      if cur < 0
+        cur = cur * 10 - (k - '0')
+      else
+        cur = cur * 10 + (k - '0')
+      end
+    end
+    entering = 1
+    return
+  end
+  if k == 8
+    if entering
+      cur = cur / 10
+    end
+    return
+  end
+  if k == 'n'
+    cur = -cur
+    if entering == 0
+      acc = cur
+    end
+    return
+  end
+  if k == '+' || k == '-' || k == '*' || k == '/'
+    if entering
+      if op != 0
+        call compute
+      else
+        acc = cur
+      end
+    end
+    if err == 0
+      cur = acc
+      op = k
+      entering = 0
+      fresh = 1
+    end
+    return
+  end
+  if k == '=' || k == ENTER
+    if op != 0 && (entering || fresh == 0)
+      call compute
+    else
+      if entering
+        acc = cur
+      end
+    end
+    if err == 0
+      cur = acc
+      op = 0
+      entering = 0
+      fresh = 1
+    end
+  end
+end
+
+# the width of v in characters
+sub measure
+  digits = 1
+  n = abs(v)
+  while n >= 10
+    n = n / 10
+    digits = digits + 1
+  end
+  if v < 0
+    digits = digits + 1
+  end
+end
+
+sub draw_keys
+  r = 0
+  while r < 5
+    c = 0
+    while c < 4
+      i = r * 4 + c
+      w = 72
+      x = 164 + c * 78
+      y = 144 + r * 48
+      # a wide button covers two cells: draw it once, from its left cell
+      let draw = 1
+      let selected = 0
+      if r == 4
+        w = 150
+        if c == 1 || c == 3
+          draw = 0
+        end
+        if r == cr && ((c == 0 && cc < 2) || (c == 2 && cc >= 2))
+          selected = 1
+        end
+      else
+        if r == cr && c == cc
+          selected = 1
+        end
+      end
+      if draw
+        # the button
+        color 8
+        if selected
+          color 9
+        end
+        rect x, y, w, 40
+        color 0
+        if flash && selected
+          color 9
+        end
+        rect x + 2, y + 2, w - 4, 36
+        color 7
+        if kc[i] == '=' || kc[i] == '+' || kc[i] == '-' || kc[i] == '*' || kc[i] == '/'
+          color 14
+        end
+        if kc[i] == 'c'
+          color 12
+        end
+        if selected
+          color 15
+        end
+        if flash && selected
+          color 0
+        end
+        if kc[i] == 8
+          text (x + w / 2) / 8 - 1, y / 16 + 1, "<-"
+        else
+          if kc[i] == 'n'
+            text (x + w / 2) / 8 - 1, y / 16 + 1, "+-"
+          else
+            plot (x + w / 2) / 8, y / 16 + 1, kc[i]
+          end
+        end
+      end
+      c = c + 1
+    end
+    r = r + 1
+  end
+end
+
+sub draw_display
+  # the screen
+  color 8
+  rect 164, 40, 312, 96
+  color 0
+  rect 166, 42, 308, 92
+  # the pending operation, small
+  if op != 0 && err == 0
+    v = acc
+    call measure
+    color 8
+    text 55 - digits, 4, acc
+    plot 57, 4, op
+  end
+  # the number
+  color 15
+  if err
+    color 12
+    text 40, 6, "can't divide by 0"
+  else
+    v = cur
+    call measure
+    text 59 - digits, 6, cur
+  end
+end
+
+sub draw_all
   cls
   color 15
-  text 32, 2, "ZS CALCULATOR"
-
-  # Display screen box
+  text 36, 1, "CALCULATOR"
   color 8
-  i = 24
-  while i <= 55
-    plot i, 4, 196
-    plot i, 8, 196
-    i = i + 1
-  end
-  plot 23, 5, 186
-  plot 23, 6, 186
-  plot 23, 7, 186
-  plot 56, 5, 186
-  plot 56, 6, 186
-  plot 56, 7, 186
-
-  # Show value on display
-  color 14
-  if error_state == 1
-    text 26, 6, "ERROR (DIV BY ZERO)"
-  else
-    if has_input == 1
-      text 26, 6, current_val
-    else
-      text 26, 6, acc
-    end
-  end
-
-  # Draw keypad buttons
-  color 7
-  text 32, 11, " 7   8   9   / "
-  text 32, 14, " 4   5   6   * "
-  text 32, 17, " 1   2   3   - "
-  text 32, 20, " C   0   =   + "
-
-  color 7
-  text 18, 23, "w/a/s/d or arrows: move   ENTER: press   q: quit"
+  text 12, 24, "digits + - * /   enter: =   backspace: delete   c: clear   q: quit"
+  call draw_display
+  call draw_keys
 end
 
-sub draw_cursor
-  let bx = 32
-  let by = 11
-  if cx == 0
-    bx = 32
-  end
-  if cx == 1
-    bx = 38
-  end
-  if cx == 2
-    bx = 44
-  end
-  if cx == 3
-    bx = 50
-  end
-
-  if cy == 0
-    by = 11
-  end
-  if cy == 1
-    by = 14
-  end
-  if cy == 2
-    by = 17
-  end
-  if cy == 3
-    by = 20
-  end
-
-  color 11
-  plot bx - 1, by, '['
-  plot bx + 1, by, ']'
-end
-
-sub input_0
-  if has_input == 0
-    current_val = 0
-    has_input = 1
-  else
-    current_val = current_val * 10
-  end
-end
-
-sub input_1
-  if has_input == 0
-    current_val = 1
-    has_input = 1
-  else
-    current_val = current_val * 10 + 1
-  end
-end
-
-sub input_2
-  if has_input == 0
-    current_val = 2
-    has_input = 1
-  else
-    current_val = current_val * 10 + 2
-  end
-end
-
-sub input_3
-  if has_input == 0
-    current_val = 3
-    has_input = 1
-  else
-    current_val = current_val * 10 + 3
-  end
-end
-
-sub input_4
-  if has_input == 0
-    current_val = 4
-    has_input = 1
-  else
-    current_val = current_val * 10 + 4
-  end
-end
-
-sub input_5
-  if has_input == 0
-    current_val = 5
-    has_input = 1
-  else
-    current_val = current_val * 10 + 5
-  end
-end
-
-sub input_6
-  if has_input == 0
-    current_val = 6
-    has_input = 1
-  else
-    current_val = current_val * 10 + 6
-  end
-end
-
-sub input_7
-  if has_input == 0
-    current_val = 7
-    has_input = 1
-  else
-    current_val = current_val * 10 + 7
-  end
-end
-
-sub input_8
-  if has_input == 0
-    current_val = 8
-    has_input = 1
-  else
-    current_val = current_val * 10 + 8
-  end
-end
-
-sub input_9
-  if has_input == 0
-    current_val = 9
-    has_input = 1
-  else
-    current_val = current_val * 10 + 9
-  end
-end
-
-sub compute
-  if op == 0
-    if has_input == 1
-      acc = current_val
-    end
-  end
-  if op == 1
-    acc = acc + current_val
-  end
-  if op == 2
-    acc = acc - current_val
-  end
-  if op == 3
-    acc = acc * current_val
-  end
-  if op == 4
-    if current_val == 0
-      error_state = 1
-    else
-      acc = acc / current_val
-    end
-  end
-  current_val = acc
-end
-
-sub apply_op
-  if has_input == 1
-    call compute
-  else
-    acc = current_val
-  end
-  has_input = 0
-end
-
-sub press_button
-  error_state = 0
-  # Row 0: 7, 8, 9, /
-  if cy == 0 && cx == 0
-    call input_7
-  end
-  if cy == 0 && cx == 1
-    call input_8
-  end
-  if cy == 0 && cx == 2
-    call input_9
-  end
-  if cy == 0 && cx == 3
-    call apply_op
-    op = 4
-  end
-
-  # Row 1: 4, 5, 6, *
-  if cy == 1 && cx == 0
-    call input_4
-  end
-  if cy == 1 && cx == 1
-    call input_5
-  end
-  if cy == 1 && cx == 2
-    call input_6
-  end
-  if cy == 1 && cx == 3
-    call apply_op
-    op = 3
-  end
-
-  # Row 2: 1, 2, 3, -
-  if cy == 2 && cx == 0
-    call input_1
-  end
-  if cy == 2 && cx == 1
-    call input_2
-  end
-  if cy == 2 && cx == 2
-    call input_3
-  end
-  if cy == 2 && cx == 3
-    call apply_op
-    op = 2
-  end
-
-  # Row 3: C, 0, =, +
-  if cy == 3 && cx == 0
-    acc = 0
-    current_val = 0
-    op = 0
-    has_input = 0
-  end
-  if cy == 3 && cx == 1
-    call input_0
-  end
-  if cy == 3 && cx == 2
-    call compute
-    op = 0
-    has_input = 0
-  end
-  if cy == 3 && cx == 3
-    call apply_op
-    op = 1
-  end
-end
-
+call init_keys
+call draw_all
 while running
-  call draw_keypad
-  call draw_cursor
-
   k = getkey()
   if k == 'q' || k == ESC
     running = 0
-  end
-  if k == 'w' || k == 'W' || k == UP
-    cy = cy - 1
-  end
-  if k == 's' || k == 'S' || k == DOWN
-    cy = cy + 1
-  end
-  if k == 'a' || k == 'A'
-    cx = cx - 1
-  end
-  if k == 'd' || k == 'D'
-    cx = cx + 1
-  end
-
-  cx = max(cx, 0)
-  cx = min(cx, 3)
-  cy = max(cy, 0)
-  cy = min(cy, 3)
-
-  if k == ENTER || k == ' '
-    call press_button
+  else
+    sel = 0
+    if k == UP || k == 'w'
+      cr = max(cr - 1, 0)
+    end
+    if k == DOWN || k == 's'
+      cr = min(cr + 1, 4)
+    end
+    if k == LEFT || k == 'a'
+      cc = max(cc - 1, 0)
+    end
+    if k == RIGHT || k == 'd'
+      cc = min(cc + 1, 3)
+    end
+    if k == ENTER && (cr != 4 || cc >= 0)
+      # a press on the highlighted button
+      k = kc[cr * 4 + cc]
+      sel = 1
+    end
+    if (k >= '0' && k <= '9') || k == '+' || k == '-' || k == '*' || k == '/' || k == '=' || k == 'c' || k == 8 || k == 'n' || sel
+      call press
+    end
+    flash = sel
+    call draw_all
+    if sel
+      sleep 80
+      flash = 0
+      call draw_all
+    end
   end
 end
-
 cls
 color 15
-print "Calculator closed. Final value: ", acc
+print "Thanks for using the calculator!"

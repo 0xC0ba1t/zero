@@ -14,6 +14,7 @@ const MAX_CALL_DEPTH: usize = 64;
 struct Vm<'a> {
     program: &'a Program,
     vars: Vec<i32>,
+    arrays: Vec<Vec<i32>>,
     /// return addresses of the subs that are running
     calls: Vec<usize>,
     /// index of the statement to run next
@@ -43,9 +44,11 @@ impl<'a> Vm<'a> {
         for (slot, value) in program.constants.iter().enumerate() {
             vars[slot] = *value;
         }
+        let arrays = program.arrays.iter().map(|(_, size)| vec![0; *size]).collect();
         Vm {
             program,
             vars,
+            arrays,
             calls: Vec::new(),
             pc: 0,
             // xorshift must not start at zero
@@ -87,6 +90,10 @@ impl<'a> Vm<'a> {
             Func::Key => Ok(host.key()),
             Func::GetKey => Ok(host.wait_key()),
             Func::Ticks => Ok(host.ticks() as i32),
+            Func::Down => {
+                let code = self.eval(&args[0], host)?;
+                Ok(host.key_down(code) as i32)
+            }
         }
     }
 
@@ -95,6 +102,13 @@ impl<'a> Vm<'a> {
         Ok(match expr {
             Expr::Num(value) => *value,
             Expr::Var(slot) => self.vars[*slot],
+            Expr::Index(array, index) => {
+                let i = self.eval(index, host)?;
+                match self.arrays[*array].get(i as usize) {
+                    Some(value) if i >= 0 => *value,
+                    _ => return Err("array index out of range"),
+                }
+            }
             Expr::Neg(inner) => self.eval(inner, host)?.wrapping_neg(),
             Expr::Not(inner) => (self.eval(inner, host)? == 0) as i32,
             Expr::Bin(op, left, right) => {
@@ -180,6 +194,31 @@ impl<'a> Vm<'a> {
             Stmt::Assign(slot, expr) => {
                 let value = self.eval(expr, host)?;
                 self.vars[*slot] = value;
+            }
+            Stmt::AssignIndex(array, index, value) => {
+                let i = self.eval(index, host)?;
+                let v = self.eval(value, host)?;
+                match self.arrays[*array].get_mut(i as usize) {
+                    Some(slot) if i >= 0 => *slot = v,
+                    _ => return Err("array index out of range"),
+                }
+            }
+            Stmt::Rect(x, y, w, h) => {
+                let x = self.eval(x, host)?;
+                let y = self.eval(y, host)?;
+                let w = self.eval(w, host)?;
+                let h = self.eval(h, host)?;
+                host.rect(x, y, w, h);
+            }
+            Stmt::Emote(code) => {
+                let code = self.eval(code, host)?;
+                host.emote(code);
+            }
+            Stmt::Disc(x, y, r) => {
+                let x = self.eval(x, host)?;
+                let y = self.eval(y, host)?;
+                let r = self.eval(r, host)?;
+                host.disc(x, y, r);
             }
             Stmt::Print(items) => {
                 let text = self.render(items, host)?;

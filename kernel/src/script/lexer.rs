@@ -31,6 +31,10 @@ pub enum Token {
     Bang,
     LParen,
     RParen,
+    /// `[`
+    LBracket,
+    /// `]`
+    RBracket,
     Comma,
     /// End of a statement: a newline or a `;`.
     Eol,
@@ -115,7 +119,7 @@ pub fn tokenize(source: &str) -> Result<Vec<Spanned>, ScriptError> {
                     line,
                 });
             }
-            '+' | '-' | '*' | '/' | '%' | '(' | ')' | ',' => {
+            '+' | '-' | '*' | '/' | '%' | '(' | ')' | '[' | ']' | ',' => {
                 chars.next();
                 let token = match c {
                     '+' => Token::Plus,
@@ -125,6 +129,8 @@ pub fn tokenize(source: &str) -> Result<Vec<Spanned>, ScriptError> {
                     '%' => Token::Percent,
                     '(' => Token::LParen,
                     ')' => Token::RParen,
+                    '[' => Token::LBracket,
+                    ']' => Token::RBracket,
                     _ => Token::Comma,
                 };
                 tokens.push(Spanned { token, line });

@@ -142,6 +142,8 @@ struct Scene {
     x0: usize,
     top: usize,
     bottom: usize,
+    /// Where the buddy lives: lane start, lane width, floor row, pixel size.
+    lane: (usize, usize, usize, usize),
     clouds: [Cloud; 3],
     /// Star positions `(x, y, phase)` in pixels.
     stars: Vec<(usize, usize, u32)>,
@@ -225,6 +227,7 @@ impl Scene {
             x0,
             top,
             bottom,
+            lane: (x0 + 2 * u, panel_w - 4 * u, bottom, (u * 9 / 10).max(2)),
             clouds,
             stars,
             shooting: None,
@@ -258,6 +261,9 @@ impl Scene {
             let start_y = self.top as i32 + (self.rng.next() % (14 * self.u as u32)) as i32;
             self.shooting = Some(Shooting { x: start_x, y: start_y, vx: u * 3, vy: u + (self.rng.next() % self.u as u32) as i32 });
             self.next_shooting = self.frame + 150 + self.rng.next() % 150;
+            if self.rng.next() % 3 == 0 {
+                crate::graphics::buddy::react(crate::graphics::buddy::Event::Surprise);
+            }
         }
         let mut done = false;
         if let Some(s) = self.shooting.as_mut() {
@@ -281,12 +287,14 @@ impl Scene {
             self.shooting = None;
         }
 
+        crate::graphics::buddy::draw(fb, self.lane.0, self.lane.1, self.lane.2, self.lane.3);
         fb.flush();
     }
 }
 
 /// Shows the boot screen until a key is pressed.
 pub fn run() {
+    crate::graphics::buddy::greet();
     let scene = framebuffer::with(|fb| Scene::new(fb));
     let mut scene = match scene {
         Some(scene) => scene,
@@ -295,16 +303,16 @@ pub fn run() {
             return;
         }
     };
-    let mut last = crate::time::ticks();
+    let mut last = crate::time::uptime_ms();
     loop {
         framebuffer::with(|fb| scene.frame(fb));
         if crate::input::try_read_key().is_some() {
             return;
         }
         // about 30 frames per second (the timer ticks at 100 Hz)
-        while crate::time::ticks() < last + 3 {
+        while crate::time::uptime_ms() < last + 33 {
             x86_64::instructions::hlt();
         }
-        last = crate::time::ticks();
+        last = crate::time::uptime_ms();
     }
 }

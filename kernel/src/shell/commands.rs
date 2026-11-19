@@ -1,6 +1,7 @@
 //! Built-in shell commands.
 
 use crate::fs::{Filesystem, FsError, FILESYSTEM};
+use crate::graphics::buddy;
 use crate::graphics::console::CONSOLE;
 use crate::graphics::vga;
 use crate::input::{self, Key};
@@ -65,7 +66,13 @@ pub static COMMANDS: &[Command] = &[
     command!("mem", "mem", "show heap usage", mem),
     command!("screen", "screen", "show the display mode", screen),
     command!("res", "res [<width>x<height> | native | half]", "show or change the screen resolution", res),
+    command!("buddy", "buddy [<mood>] [<activity>]", "see what Bit is up to, or ask it to do something", buddy_cmd),
+    command!("disk", "disk", "show the disk and the saved-data partition", disk_cmd),
+    command!("sync", "sync", "save the files to the disk now", sync_cmd),
+    command!("onboard", "onboard [reset]", "replay the welcome tour (reset forgets your name too)", onboard_cmd),
+    command!("doom", "doom", "play DOOM (the shareware episode, from the data partition)", doom_cmd),
     command!("bench", "bench", "measure how fast the screen can be drawn", bench),
+    command!("zsbench", "zsbench", "measure how fast the script VM runs", zsbench),
     command!("3d", "3d [<demo> | tour]", "list or run the 3D demos", demos3d),
     command!("cube", "cube", "show a spinning 3D cube", cube_demo),
     command!("version", "version", "print the kernel name and version", version),
@@ -279,16 +286,134 @@ fn demos3d(args: &[String]) -> Result<(), CommandError> {
             Ok(())
         }
         [name] if name == "tour" => {
+            buddy::set_context(buddy::Context::Demo3d);
             demo3d::run(0);
+            buddy::set_context(buddy::Context::Shell);
             Ok(())
         }
         [name] => {
             let index = demo3d::find(name).ok_or(CommandError::Failed("no such demo, see `3d`"))?;
+            buddy::set_context(buddy::Context::Demo3d);
             demo3d::run(index);
+            buddy::set_context(buddy::Context::Shell);
             Ok(())
         }
         _ => Err(CommandError::Usage),
     }
+}
+
+/// Starts the Doom engine.
+fn doom_cmd(args: &[String]) -> Result<(), CommandError> {
+    // `doom wasd` adds WASD movement (E to use); the original keys always work
+    let wasd = matches!(args, [only] if only == "wasd");
+    if !args.is_empty() && !wasd {
+        return Err(CommandError::Usage);
+    }
+    crate::input::set_doom_wasd(wasd);
+    match crate::doom::run() {
+        Ok(()) => Ok(()),
+        Err(message) => {
+            fb_println!("{}{}{}", RED, message, RESET);
+            Err(CommandError::Reported)
+        }
+    }
+}
+
+/// Replays the welcome tour.
+fn onboard_cmd(args: &[String]) -> Result<(), CommandError> {
+    match args {
+        [] => {}
+        [word] if word == "reset" => crate::settings::clear(),
+        _ => return Err(CommandError::Usage),
+    }
+    crate::onboard::run();
+    crate::graphics::ui::restore_shell_screen();
+    Ok(())
+}
+
+/// Shows what the disk and its partition look like.
+fn disk_cmd(args: &[String]) -> Result<(), CommandError> {
+    expect_no_args(args)?;
+    fb_println!("{}", crate::partition::describe());
+    match crate::partition::asset("doom1.wad") {
+        Some(wad) => fb_println!("asset    doom1.wad, {} KiB", wad.size / 1024),
+        None => fb_println!("asset    doom1.wad is not on this disk"),
+    }
+    Ok(())
+}
+
+fn sync_cmd(args: &[String]) -> Result<(), CommandError> {
+    expect_no_args(args)?;
+    if !crate::partition::present() {
+        return Err(CommandError::Failed("there is no data partition to save to"));
+    }
+    // mark everything as changed so a full save is written
+    if let Some(fs) = crate::fs::FILESYSTEM.lock().as_mut() {
+        let _ = fs.create_file("/.sync");
+        let _ = fs.delete("/.sync");
+    }
+    crate::pfs::sync_if_dirty();
+    fb_println!("saved");
+    Ok(())
+}
+
+/// The little creature in the status bar.
+fn buddy_cmd(args: &[String]) -> Result<(), CommandError> {
+    match args {
+        [] => {
+            let s = buddy::status();
+            fb_println!("Bit is feeling {}, doing: {} ({}), behavior #{} of {}", s.mood, s.activity, s.intensity, s.behavior_id, buddy::behavior_count());
+            fb_println!("{}  energy {}  mood {}  boredom {}  curiosity {}  (watching: {:?}){}", GRAY, s.energy, s.valence, s.boredom, s.curiosity, s.context, RESET);
+            fb_print!("{}  activities:{}", GRAY, RESET);
+            for (_, name) in buddy::ACTIVITIES.iter() {
+                fb_print!(" {}", name);
+            }
+            fb_println!();
+            fb_println!("{}  `buddy <activity>`, `buddy <mood> <activity>`, `buddy say <text>`, `buddy chatty 0|1|2`{}", GRAY, RESET);
+            fb_println!("{}  moods: {}{}", GRAY, buddy::MOOD_NAMES.join(" "), RESET);
+            Ok(())
+        }
+        [word, text @ ..] if word == "say" && !text.is_empty() => {
+            buddy::say(&text.join(" "));
+            Ok(())
+        }
+        [word, level] if word == "chatty" => {
+            let level: u8 = level.parse().map_err(|_| CommandError::Usage)?;
+            buddy::set_chatty(level);
+            crate::settings::set("chatty", &alloc::format!("{}", level.min(2)));
+            Ok(())
+        }
+        [name] => {
+            if buddy::perform(name, None) {
+                Ok(())
+            } else {
+                Err(CommandError::Failed("no such activity, see `buddy`"))
+            }
+        }
+        [mood, name] => {
+            let mood = buddy::mood_from(mood).ok_or(CommandError::Failed("moods: neutral happy tired excited curious grumpy"))?;
+            if buddy::perform(name, Some(mood)) {
+                Ok(())
+            } else {
+                Err(CommandError::Failed("no such activity, see `buddy`"))
+            }
+        }
+        _ => Err(CommandError::Usage),
+    }
+}
+
+/// Runs a counting loop in the script VM for a second and reports its speed.
+fn zsbench(args: &[String]) -> Result<(), CommandError> {
+    expect_no_args(args)?;
+    run_script(
+        "zsbench",
+        "let t = ticks()
+let n = 0
+while ticks() < t + 1000
+  n = n + 1
+end
+print n, \" loop iterations in one second (about 4 statements each)\"",
+    )
 }
 
 /// Fills the whole screen repeatedly and reports the frame rate.
@@ -318,7 +443,9 @@ fn bench(args: &[String]) -> Result<(), CommandError> {
 
 fn cube_demo(args: &[String]) -> Result<(), CommandError> {
     expect_no_args(args)?;
+    buddy::set_context(buddy::Context::Demo3d);
     crate::graphics::demo3d::run(0);
+    buddy::set_context(buddy::Context::Shell);
     Ok(())
 }
 
@@ -349,15 +476,24 @@ fn shutdown(args: &[String]) -> Result<(), CommandError> {
 
 /// Runs script source on the real screen and keyboard, reporting errors.
 fn run_script(title: &str, source: &str) -> Result<(), CommandError> {
+    use buddy::Context;
+    buddy::set_context(match title {
+        "pong" | "snake" | "invaders" => Context::ActionGame,
+        "tictactoe" | "connect4" => Context::BoardGame,
+        "calculator" => Context::Calculator,
+        _ => Context::Script,
+    });
     let mut host = crate::script::kernel_host::KernelHost::new().with_title(title);
-    match crate::script::run(source, &mut host) {
+    let result = match crate::script::run(source, &mut host) {
         Ok(()) => Ok(()),
         Err(error) => {
             drop(host);
             fb_println!("script error: {}", error);
             Err(CommandError::Reported)
         }
-    }
+    };
+    buddy::set_context(Context::Shell);
+    result
 }
 
 fn run(args: &[String]) -> Result<(), CommandError> {
@@ -542,6 +678,13 @@ fn mv(args: &[String]) -> Result<(), CommandError> {
 /// A small full-screen text editor. Escape saves and quits, ctrl+c quits
 /// without saving, ctrl+s saves.
 fn edit(args: &[String]) -> Result<(), CommandError> {
+    buddy::set_context(buddy::Context::Editing);
+    let result = edit_inner(args);
+    buddy::set_context(buddy::Context::Shell);
+    result
+}
+
+fn edit_inner(args: &[String]) -> Result<(), CommandError> {
     let path = match args {
         [path] => path,
         _ => return Err(CommandError::Usage),

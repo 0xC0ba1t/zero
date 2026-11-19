@@ -67,7 +67,8 @@ pub fn layout(width: usize, height: usize) -> Layout {
         height,
         font,
         title_h: font.height() + 18,
-        status_h: font.height() + 10,
+        // tall enough for the buddy to stand in
+        status_h: (font.height() + 10).max(46).max(height / 18),
     }
 }
 
@@ -121,6 +122,26 @@ pub fn draw_status(fb: &mut Framebuffer, lay: &Layout, left: &str, right: &str) 
     font.draw_text(fb, 12, text_y, left, TEXT_MUTED, BG_BAR);
     let right_w = font.text_width(right);
     font.draw_text(fb, lay.width.saturating_sub(right_w + 12), text_y, right, TEXT_MUTED, BG_BAR);
+
+    // the buddy wanders in the space between the two texts
+    let lane_x = 12 + font.text_width(left) + 24;
+    let lane_end = lay.width.saturating_sub(right_w + 12 + 24);
+    let scale = (lay.status_h.saturating_sub(2)) / 22;
+    if scale >= 1 && lane_end > lane_x + 26 * scale {
+        // Bit may jump higher than the bar; keep it inside
+        fb.set_clip(0, y, lay.width, lay.status_h);
+        crate::graphics::buddy::draw(fb, lane_x, lane_end - lane_x, lay.height - 1, scale);
+        fb.clear_clip();
+        // what Bit is thinking, in a little bubble beside it
+        if let Some(text) = crate::graphics::buddy::thought() {
+            let bx = crate::graphics::buddy::screen_x(lane_x, lane_end - lane_x, scale) + 26 * scale + 6;
+            let w = font.text_width(&text) + 16;
+            if bx + w < lane_end {
+                fill_round(fb, bx, y + (lay.status_h - font.height() - 8) / 2, w, font.height() + 8, 6, BG_PANEL);
+                font.draw_text(fb, bx + 8, y + (lay.status_h - font.height()) / 2, &text, TEXT, BG_PANEL);
+            }
+        }
+    }
 }
 
 // ----- the shell's window -----
@@ -149,6 +170,7 @@ pub fn draw_shell_chrome(fb: &mut Framebuffer) {
 }
 
 static LAST_STATUS_SECOND: AtomicU64 = AtomicU64::new(u64::MAX);
+static LAST_BUDDY_FRAME: AtomicU64 = AtomicU64::new(0);
 
 /// Redraws just the status bar (after a command, or when the clock moves).
 pub fn refresh_status() {
@@ -163,13 +185,33 @@ pub fn refresh_status() {
         fb.flush();
     });
     LAST_STATUS_SECOND.store(crate::time::uptime_secs(), Ordering::Relaxed);
+    LAST_BUDDY_FRAME.store(crate::time::uptime_ms(), Ordering::Relaxed);
 }
 
-/// Called while the shell waits for a key: keeps the clock in the status bar current.
+/// Called while the shell waits for a key: keeps the clock in the status bar
+/// current and the buddy moving (about ten frames a second).
 pub fn tick_status() {
-    if LAST_STATUS_SECOND.load(Ordering::Relaxed) != crate::time::uptime_secs() {
+    let now = crate::time::uptime_ms();
+    if LAST_STATUS_SECOND.load(Ordering::Relaxed) != crate::time::uptime_secs()
+        || now.saturating_sub(LAST_BUDDY_FRAME.load(Ordering::Relaxed)) >= 100
+    {
         refresh_status();
     }
+}
+
+/// Keeps the buddy moving in a status bar that something else owns (a script
+/// screen, a 3D demo): redraws just that bar when a frame is due.
+pub fn tick_buddy(left: &str, right: &str) {
+    let now = crate::time::uptime_ms();
+    if now.saturating_sub(LAST_BUDDY_FRAME.load(Ordering::Relaxed)) < 100 {
+        return;
+    }
+    LAST_BUDDY_FRAME.store(now, Ordering::Relaxed);
+    framebuffer::with(|fb| {
+        let lay = layout(fb.width(), fb.height());
+        draw_status(fb, &lay, left, right);
+        fb.flush();
+    });
 }
 
 /// Repaints the whole shell window: background, bars and console text.

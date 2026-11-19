@@ -14,6 +14,8 @@ pub enum Node {
 pub struct Filesystem {
     root: Node,
     cwd: String,
+    /// Set by every change; cleared when the file system is saved.
+    dirty: bool,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -70,6 +72,7 @@ impl Filesystem {
         Self {
             root: Node::Directory(BTreeMap::new()),
             cwd: String::from("/"),
+            dirty: false,
         }
     }
 
@@ -126,6 +129,7 @@ impl Filesystem {
     }
 
     pub fn create_file(&mut self, path: &str) -> Result<(), FsError> {
+        self.dirty = true;
         let (dir, name) = self.parent_mut(path)?;
         if dir.contains_key(&name) {
             return Err(FsError::AlreadyExists);
@@ -135,6 +139,7 @@ impl Filesystem {
     }
 
     pub fn create_dir(&mut self, path: &str) -> Result<(), FsError> {
+        self.dirty = true;
         let (dir, name) = self.parent_mut(path)?;
         if dir.contains_key(&name) {
             return Err(FsError::AlreadyExists);
@@ -151,6 +156,7 @@ impl Filesystem {
     }
 
     pub fn write_file(&mut self, path: &str, data: Vec<u8>) -> Result<(), FsError> {
+        self.dirty = true;
         let parts = components(&self.cwd, path);
         match self.node_mut(&parts) {
             Ok(Node::File(file)) => {
@@ -169,6 +175,7 @@ impl Filesystem {
     }
 
     pub fn delete(&mut self, path: &str) -> Result<(), FsError> {
+        self.dirty = true;
         let (dir, name) = self.parent_mut(path)?;
         dir.remove(&name).map(|_| ()).ok_or(FsError::NotFound)
     }
@@ -192,6 +199,67 @@ impl Filesystem {
                 })
                 .collect()),
             Node::File(_) => Err(FsError::NotADirectory),
+        }
+    }
+
+    /// Whether anything changed since the last call; clears the flag.
+    pub fn take_dirty(&mut self) -> bool {
+        core::mem::replace(&mut self.dirty, false)
+    }
+
+    /// The whole tree as bytes, for saving.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        fn write(node: &Node, out: &mut Vec<u8>) {
+            match node {
+                Node::File(data) => {
+                    out.push(0);
+                    out.extend_from_slice(&(data.len() as u32).to_le_bytes());
+                    out.extend_from_slice(data);
+                }
+                Node::Directory(children) => {
+                    out.push(1);
+                    out.extend_from_slice(&(children.len() as u32).to_le_bytes());
+                    for (name, child) in children {
+                        out.extend_from_slice(&(name.len() as u16).to_le_bytes());
+                        out.extend_from_slice(name.as_bytes());
+                        write(child, out);
+                    }
+                }
+            }
+        }
+        let mut out = Vec::new();
+        write(&self.root, &mut out);
+        out
+    }
+
+    /// Rebuilds a file system from [`Filesystem::to_bytes`] output.
+    pub fn from_bytes(bytes: &[u8]) -> Option<Filesystem> {
+        fn read(bytes: &[u8], at: &mut usize) -> Option<Node> {
+            let tag = *bytes.get(*at)?;
+            *at += 1;
+            let len = u32::from_le_bytes(bytes.get(*at..*at + 4)?.try_into().ok()?) as usize;
+            *at += 4;
+            if tag == 0 {
+                let data = bytes.get(*at..*at + len)?.to_vec();
+                *at += len;
+                Some(Node::File(data))
+            } else {
+                let mut children = BTreeMap::new();
+                for _ in 0..len {
+                    let name_len = u16::from_le_bytes(bytes.get(*at..*at + 2)?.try_into().ok()?) as usize;
+                    *at += 2;
+                    let name = String::from_utf8(bytes.get(*at..*at + name_len)?.to_vec()).ok()?;
+                    *at += name_len;
+                    children.insert(name, read(bytes, at)?);
+                }
+                Some(Node::Directory(children))
+            }
+        }
+        let mut at = 0;
+        let root = read(bytes, &mut at)?;
+        match root {
+            Node::Directory(_) => Some(Filesystem { root, cwd: String::from("/"), dirty: false }),
+            Node::File(_) => None,
         }
     }
 

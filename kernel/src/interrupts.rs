@@ -62,6 +62,7 @@ lazy_static! {
             .set_handler_fn(timer_interrupt_handler);
         idt[InterruptIndex::Keyboard.as_u8()]
             .set_handler_fn(keyboard_interrupt_handler);
+        idt[PIC_2_OFFSET + 4].set_handler_fn(mouse_interrupt_handler);
 
         idt
     };
@@ -109,12 +110,19 @@ extern "x86-interrupt" fn timer_interrupt_handler(
         PICS.lock()
             .notify_end_of_interrupt(InterruptIndex::Timer.as_u8());
     }
+
+    // keep Doom's sound card fed even while the game is busy drawing a frame
+    // (a big screen takes longer than the audio buffered ahead)
+    static TICKS: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+    if TICKS.fetch_add(1, core::sync::atomic::Ordering::Relaxed) % 4 == 0 {
+        crate::doom::audio_tick();
+    }
 }
 
 extern "x86-interrupt" fn keyboard_interrupt_handler(
     _stack_frame: InterruptStackFrame)
 {
-    use pc_keyboard::{layouts, DecodedKey, HandleControl, KeyCode, Keyboard, ScancodeSet1};
+    use pc_keyboard::{layouts, DecodedKey, HandleControl, KeyCode, KeyState, Keyboard, ScancodeSet1};
     use spin::Mutex;
     use x86_64::instructions::port::Port;
 
@@ -130,6 +138,8 @@ extern "x86-interrupt" fn keyboard_interrupt_handler(
 
     let scancode: u8 = unsafe { port.read() };
     if let Ok(Some(key_event)) = keyboard.add_byte(scancode) {
+        input::set_held(key_event.code as usize, key_event.state != KeyState::Up);
+        input::doom_key_event(key_event.code, key_event.state == KeyState::Down);
         if let Some(key) = keyboard.process_keyevent(key_event) {
             match key {
                 DecodedKey::Unicode(character) => {
@@ -137,6 +147,7 @@ extern "x86-interrupt" fn keyboard_interrupt_handler(
                     if character == '\u{3}' {
                         input::request_interrupt();
                     }
+                    crate::graphics::buddy::note_key();
                     input::push_key(Key::Char(character));
                 }
                 DecodedKey::RawKey(KeyCode::ArrowUp) => input::push_key(Key::Up),
@@ -156,6 +167,16 @@ extern "x86-interrupt" fn keyboard_interrupt_handler(
     unsafe {
         PICS.lock()
             .notify_end_of_interrupt(InterruptIndex::Keyboard.as_u8());
+    }
+}
+
+extern "x86-interrupt" fn mouse_interrupt_handler(_stack_frame: InterruptStackFrame) {
+    use x86_64::instructions::port::Port;
+
+    let byte: u8 = unsafe { Port::new(0x60).read() };
+    crate::mouse::handle_byte(byte);
+    unsafe {
+        PICS.lock().notify_end_of_interrupt(PIC_2_OFFSET + 4);
     }
 }
 

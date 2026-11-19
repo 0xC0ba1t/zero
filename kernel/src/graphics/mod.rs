@@ -2,6 +2,7 @@
 //! palette and cell renderer, and the boot screen.
 
 pub mod bootscreen;
+pub mod buddy;
 pub mod console;
 pub mod demo3d;
 pub mod display;

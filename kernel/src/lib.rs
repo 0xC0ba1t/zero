@@ -2,6 +2,7 @@
 #![cfg_attr(test, no_main)]
 #![feature(custom_test_frameworks)]
 #![feature(abi_x86_interrupt)]
+#![feature(c_variadic)]
 #![test_runner(crate::test_runner)]
 #![reexport_test_harness_main = "test_main"]
 
@@ -24,7 +25,14 @@ pub mod power;
 pub mod shell;
 pub mod script;
 pub mod fs;
+pub mod disk;
+pub mod mouse;
+pub mod doom;
+pub mod partition;
+pub mod pfs;
+pub mod settings;
 pub mod graphics;
+pub mod onboard;
 
 pub trait Testable {
     fn run(&self) -> ();
@@ -100,6 +108,7 @@ pub fn init() {
     serial_println!("[kernel] PIC initialized");
     serial_println!("[kernel] initializing PIT");
     time::init_pit();
+    time::calibrate_tsc();
     serial_println!("[kernel] PIT initialized");
     serial_println!("[kernel] masking all PIC interrupts");
     unsafe {

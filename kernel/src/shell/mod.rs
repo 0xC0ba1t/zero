@@ -8,6 +8,7 @@ mod parser;
 
 use crate::fs::FILESYSTEM;
 use crate::graphics::console::CONSOLE;
+use crate::graphics::buddy;
 use crate::graphics::ui;
 use crate::input;
 use crate::{fb_print, fb_println};
@@ -68,6 +69,10 @@ fn next_key() -> input::Key {
 
 /// Runs the shell forever: reads keys, edits the current line, and executes it on enter.
 pub fn run() -> ! {
+    if let Some(name) = crate::settings::get("name") {
+        fb_println!("welcome back, {}{}{}", GREEN, name, RESET);
+        buddy::say(&alloc::format!("welcome back, {}!", name));
+    }
     fb_println!(
         "{}{}{} shell v{} - type {}help{} for a list of commands",
         GREEN,
@@ -78,6 +83,7 @@ pub fn run() -> ! {
         RESET
     );
 
+    buddy::set_context(buddy::Context::Shell);
     let mut editor = LineEditor::new();
     let mut prompt = show_prompt(&mut editor);
 
@@ -88,7 +94,19 @@ pub fn run() -> ! {
                 fb_println!();
                 let line = editor.take();
                 HISTORY.lock().push(&line);
-                execute(&line);
+                let outcome = execute(&line);
+                buddy::observe_command(&line, outcome == Outcome::Success);
+                match outcome {
+                    Outcome::Empty => {}
+                    Outcome::Success => {
+                        // it does not cheer for every command, that would be exhausting
+                        if crate::time::uptime_ms() % 3 == 0 {
+                            buddy::react(buddy::Event::Success);
+                        }
+                    }
+                    _ => buddy::react(buddy::Event::Failure),
+                }
+                crate::pfs::sync_if_dirty();
                 ui::refresh_status();
                 prompt = show_prompt(&mut editor);
             }

@@ -23,6 +23,16 @@ pub trait Host {
     fn sleep(&mut self, ms: u32);
     /// Milliseconds since boot.
     fn ticks(&mut self) -> u64;
+    /// Fills a rectangle (in pixels of a 640x400 screen) with the current color.
+    fn rect(&mut self, _x: i32, _y: i32, _w: i32, _h: i32) {}
+    /// Fills a circle (in pixels of a 640x400 screen) with the current color.
+    fn disc(&mut self, _x: i32, _y: i32, _r: i32) {}
+    /// The script tells the system how it is going (see `emote`).
+    fn emote(&mut self, _code: i32) {}
+    /// Whether a key is being held down right now.
+    fn key_down(&mut self, _code: i32) -> bool {
+        false
+    }
     /// Returns true if the user asked to stop the script (ctrl+c).
     fn interrupted(&mut self) -> bool;
 }
