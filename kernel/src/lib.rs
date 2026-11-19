@@ -1,0 +1,169 @@
+#![no_std]
+#![cfg_attr(test, no_main)]
+#![feature(custom_test_frameworks)]
+#![feature(abi_x86_interrupt)]
+#![feature(c_variadic)]
+#![test_runner(crate::test_runner)]
+#![reexport_test_harness_main = "test_main"]
+
+use core::panic::PanicInfo;
+#[cfg(test)]
+use bootloader_api::{BootInfo, entry_point, config::{BootloaderConfig, Mapping}};
+
+use interrupts::PIC_1_OFFSET;
+
+extern crate alloc;
+
+pub mod serial;
+pub mod interrupts;
+pub mod gdt;
+pub mod memory;
+pub mod allocator;
+pub mod input;
+pub mod time;
+pub mod power;
+pub mod shell;
+pub mod script;
+pub mod fs;
+pub mod disk;
+pub mod mouse;
+pub mod doom;
+pub mod partition;
+pub mod pfs;
+pub mod settings;
+pub mod graphics;
+pub mod onboard;
+
+pub trait Testable {
+    fn run(&self) -> ();
+}
+
+impl<T> Testable for T
+where
+    T: Fn(),
+{
+    fn run(&self) {
+        serial_print!("{}...\t", core::any::type_name::<T>());
+        self();
+        serial_println!("[ok]");
+    }
+}
+
+pub fn test_runner(tests: &[&dyn Testable]) {
+    serial_println!("Running {} tests", tests.len());
+    for test in tests {
+        test.run();
+    }
+    exit_qemu(QemuExitCode::Success);
+}
+
+pub fn test_panic_handler(info: &PanicInfo) -> ! {
+    serial_println!("[failed]\n");
+    serial_println!("Error: {}\n", info);
+    exit_qemu(QemuExitCode::Failed);
+    hlt_loop();
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u32)]
+pub enum QemuExitCode {
+    Success = 0x10,
+    Failed = 0x11,
+}
+
+pub fn exit_qemu(exit_code: QemuExitCode) {
+    use x86_64::instructions::port::Port;
+
+    unsafe {
+        let mut port = Port::new(0xf4);
+        port.write(exit_code as u32);
+    }
+}
+
+pub fn hlt_loop() -> ! {
+    loop {
+        x86_64::instructions::hlt();
+    }
+}
+
+/// Halt the CPU with interrupts disabled, preventing nested interrupts
+/// from firing during a halt loop (e.g. when the timer fires every 10ms).
+pub fn hlt_loop_noirq() -> ! {
+    x86_64::instructions::interrupts::disable();
+    loop {
+        x86_64::instructions::hlt();
+    }
+}
+
+/// Initialize the GDT, IDT, and interrupt controllers.
+pub fn init() {
+    serial_println!("[kernel] loading GDT");
+    gdt::init();
+    serial_println!("[kernel] GDT loaded");
+    serial_println!("[kernel] loading IDT");
+    interrupts::init_idt();
+    serial_println!("[kernel] IDT loaded");
+    serial_println!("[kernel] initializing PIC");
+    unsafe { interrupts::PICS.lock().initialize() };
+    serial_println!("[kernel] PIC initialized");
+    serial_println!("[kernel] initializing PIT");
+    time::init_pit();
+    time::calibrate_tsc();
+    serial_println!("[kernel] PIT initialized");
+    serial_println!("[kernel] masking all PIC interrupts");
+    unsafe {
+        interrupts::PICS.lock().write_masks(0xFF, 0xFF);
+    }
+    serial_println!("[kernel] PIC interrupts masked");
+    serial_println!("[kernel] enabling interrupts");
+    x86_64::instructions::interrupts::enable();
+    serial_println!("[kernel] interrupts enabled");
+}
+
+#[derive(Debug, Clone, Copy)]
+#[repr(u8)]
+pub enum InterruptIndex {
+    Timer = PIC_1_OFFSET,
+    Keyboard,
+}
+
+impl InterruptIndex {
+    pub fn as_u8(self) -> u8 {
+        self as u8
+    }
+}
+
+#[cfg(test)]
+pub static BOOTLOADER_CONFIG: BootloaderConfig = {
+    let mut config = BootloaderConfig::new_default();
+    config.mappings.physical_memory = Some(Mapping::Dynamic);
+    config
+};
+
+#[cfg(test)]
+entry_point!(test_kernel_main, config = &BOOTLOADER_CONFIG);
+
+/// Entry point for `cargo xtest`
+#[cfg(test)]
+#[no_mangle]
+fn test_kernel_main(boot_info: &'static mut BootInfo) -> ! {
+    use crate::memory::BootInfoFrameAllocator;
+    use x86_64::VirtAddr;
+
+    init();
+
+    // many tests allocate (shell parser, line editor, history), so they need a heap
+    let phys_mem_offset = VirtAddr::new(boot_info.physical_memory_offset.into_option().unwrap_or(0));
+    let mut mapper = unsafe { memory::init(phys_mem_offset) };
+    let mut frame_allocator = unsafe { BootInfoFrameAllocator::init(&boot_info.memory_regions) };
+    allocator::init_heap(&mut mapper, &mut frame_allocator).expect("heap initialization failed");
+
+    test_main();
+    hlt_loop();
+}
+
+#[cfg(test)]
+#[panic_handler]
+fn panic(info: &PanicInfo) -> ! {
+    test_panic_handler(info)
+}

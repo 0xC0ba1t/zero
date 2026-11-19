@@ -1,36 +1,38 @@
+[workspace]
+resolver = "3"
+members = ["kernel"]
+
 [package]
-name = "zero"
-version = "0.3.0"
+name = "zero-os"
+version = "0.1.0"
 edition = "2021"
 
-[[test]]
-name = "should_panic"
-harness = false
+[build-dependencies]
+zero = { path = "kernel", artifact = "bin", target = "x86_64-zero.json" }
+bootloader = "0.11"
+bootloader-boot-config = "0.11"
 
-[[test]]
-name = "stack_overflow"
-harness = false
+[lib]
+path = "src/lib.rs"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[profile.dev]
+panic = "abort"
+# The kernel does real work per frame (pixel pushing, glyph blending). Unoptimized
+# code is an order of magnitude slower, so even debug builds are optimized.
+opt-level = 2
 
-[dependencies]
-bootloader = { version = "0.9", features = ["map_physical_memory"]}
-volatile = "0.2.6"
-spin = "0.5.2"
-x86_64 = { version = "0.14.2", default-features = false, features = ["instructions", "abi_x86_interrupt", "const_fn", "inline_asm"] }
-uart_16550 = "0.2.0"
-pic8259 = "0.10.1"
-pc-keyboard = "0.7.0"
-linked_list_allocator = "0.9.0"
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
 
-[dependencies.lazy_static]
-version = "1.0"
-features = ["spin_no_std"]
+panic = "abort"
 
+# The kernel is an artifact dependency of build.rs, so cargo builds it (and
+# the standard library) with the *build-override* profile, which defaults to
+# no optimization at all. Without these the kernel runs unoptimized.
+[profile.dev.build-override]
+opt-level = 2
 
-[package.metadata.bootimage]
-test-args = [
-    "-device", "isa-debug-exit,iobase=0xf4,iosize=0x04", "-serial", "stdio",
-    "-display", "none"
-]
-test-success-exit-code = 33         # (0x10 << 1) | 1
+[profile.release.build-override]
+opt-level = 3

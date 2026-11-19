@@ -1,0 +1,36 @@
+[package]
+name = "zero"
+version = "0.3.0"
+edition = "2021"
+
+[[bin]]
+name = "zero"
+path = "src/main.rs"
+
+[[test]]
+name = "should_panic"
+harness = false
+
+[[test]]
+name = "stack_overflow"
+harness = false
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+bootloader_api = "0.11"
+volatile = "0.2.6"
+spin = "0.5.2"
+x86_64 = { version = "0.15.2", default-features = false, features = ["instructions", "abi_x86_interrupt", "const_fn", "asm_const"] }
+uart_16550 = "0.2.0"
+pic8259 = "0.10.1"
+pc-keyboard = "0.7.0"
+linked_list_allocator = "0.9.0"
+glam = { version = "0.29", default-features = false, features = ["libm"] }
+libm = "0.2.11"
+noto-sans-mono-bitmap = { version = "0.3", default-features = false, features = ["regular", "bold", "size_16", "size_20", "size_24", "size_32", "unicode-basic-latin"] }
+
+[dependencies.lazy_static]
+version = "1.0"
+features = ["spin_no_std"]
+
