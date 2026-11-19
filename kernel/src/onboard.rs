@@ -186,7 +186,7 @@ pub fn run() {
 
         // about 30 frames a second
         while crate::time::uptime_ms() < last + 33 {
-            x86_64::instructions::hlt();
+            crate::sched::yield_idle();
         }
         last = crate::time::uptime_ms();
     }

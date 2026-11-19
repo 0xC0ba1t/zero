@@ -107,20 +107,37 @@ pub fn push_key(key: Key) {
 /// `hlt` (`enable_and_hlt` enables interrupts right before halting).
 pub fn read_key() -> Key {
     loop {
-        interrupts::disable();
-        let key = INPUT.lock().pop();
-        match key {
-            Some(key) => {
-                interrupts::enable();
-                return key;
-            }
-            None => interrupts::enable_and_hlt(),
+        if let Some(key) = try_read_key() {
+            crate::sched::note_progress();
+            return key;
         }
+        crate::sched::yield_idle();
     }
 }
 
 /// Returns the oldest queued key without waiting, if there is one.
 pub fn try_read_key() -> Option<Key> {
+    // a program in a window gets the keys the desktop sends to that window
+    if let Some(ctx) = crate::sched::context() {
+        if ctx.is_closed() {
+            // tell the program to stop (ctrl+c)
+            request_interrupt();
+            return Some(Key::Char('\u{3}'));
+        }
+        loop {
+            let event = ctx.events.lock().pop_front()?;
+            match event {
+                crate::gui::Event::Key(key) => return Some(key),
+                crate::gui::Event::Resize { .. } => crate::gui::note_resize(),
+                _ => {}
+            }
+        }
+    }
+    interrupts::without_interrupts(|| INPUT.lock().pop())
+}
+
+/// Takes the next key straight from the keyboard queue (for the desktop itself).
+pub fn pop_raw_key() -> Option<Key> {
     interrupts::without_interrupts(|| INPUT.lock().pop())
 }
 
@@ -243,6 +260,12 @@ fn key_index(code: i32) -> Option<usize> {
 
 /// Whether the key is being held down right now.
 pub fn key_down(code: i32) -> bool {
+    // a window that is not in front does not see the keyboard
+    if let Some(ctx) = crate::sched::context() {
+        if !ctx.focused.load(Ordering::Relaxed) {
+            return false;
+        }
+    }
     match key_index(code) {
         Some(index) if index < 64 => HELD_LOW.load(Ordering::Relaxed) & (1 << index) != 0,
         Some(index) if index < 128 => HELD_HIGH.load(Ordering::Relaxed) & (1 << (index - 64)) != 0,
@@ -386,4 +409,17 @@ pub fn doom_pop() -> Option<(bool, u8)> {
     let event = DOOM_EVENTS[head].load(Ordering::Relaxed);
     DOOM_HEAD.store((head + 1) % DOOM_QUEUE, Ordering::Release);
     Some((event >> 8 != 0, event as u8))
+}
+
+/// Whether a physical key (by name) is held down right now (for the desktop's
+/// modifier keys).
+pub fn held(code: pc_keyboard::KeyCode) -> bool {
+    let index = code as usize;
+    if index < 64 {
+        HELD_LOW.load(Ordering::Relaxed) & (1 << index) != 0
+    } else if index < 128 {
+        HELD_HIGH.load(Ordering::Relaxed) & (1 << (index - 64)) != 0
+    } else {
+        false
+    }
 }

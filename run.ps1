@@ -18,7 +18,7 @@ if (-not $qemu) { $qemu = "C:\Program Files\qemu\qemu-system-x86_64.exe" }
 $share = Join-Path (Split-Path $qemu) "share"
 $images = Join-Path $PSScriptRoot "target\x86_64-zero\$profile"
 
-$args = @("-m", "256M", "-serial", "stdio", "-display", "gtk,zoom-to-fit=on",
+$args = @("-m", "256M", "-smp", "4", "-serial", "stdio", "-display", "gtk,zoom-to-fit=on,grab-on-hover=on",
           "-audiodev", "dsound,id=snd0", "-device", "AC97,audiodev=snd0")
 if ($Bios) {
     $args += @("-drive", "format=raw,file=$images\bios.img")

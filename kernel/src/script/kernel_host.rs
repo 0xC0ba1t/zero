@@ -48,6 +48,8 @@ pub struct KernelHost {
     last_flush: u64,
     /// The text on the right of the status bar of the script screen.
     status_right: String,
+    /// Runs in a window of its own (a desktop app), not on the shell's screen.
+    standalone: bool,
 }
 
 impl KernelHost {
@@ -69,12 +71,19 @@ impl KernelHost {
             font: Font::console(),
             last_flush: 0,
             status_right: String::new(),
+            standalone: false,
         }
     }
 
     /// Names the script in the title bar of the script screen.
     pub fn with_title(mut self, title: &str) -> KernelHost {
         self.title = String::from(title);
+        self
+    }
+
+    /// Marks this host as the whole content of a desktop window.
+    pub fn standalone(mut self) -> KernelHost {
+        self.standalone = true;
         self
     }
 
@@ -98,9 +107,11 @@ impl KernelHost {
             let oy = lay.body_y() + area_h.saturating_sub(ROWS * ch) / 2;
             geometry = Some((cw, ch, ox, oy, lay.body_y(), area_h));
             fb.clear_to(BACKGROUND);
-            ui::draw_title(fb, &lay, &title, "ctrl+c to quit");
             let info = alloc::format!("{}x{} cells of {}x{} px", COLS, ROWS, cw, ch);
-            ui::draw_status(fb, &lay, "script", &info);
+            if !ui::is_gui() {
+                ui::draw_title(fb, &lay, &title, "ctrl+c to quit");
+                ui::draw_status(fb, &lay, "script", &info);
+            }
             fb.flush();
             status = info;
         });
@@ -131,6 +142,25 @@ impl KernelHost {
             BACKGROUND,
             &self.font,
         );
+    }
+
+    /// The window was resized: lay the grid out again and repaint it.
+    fn relayout_if_resized(&mut self) {
+        let Some(ctx) = crate::sched::context() else { return };
+        if !ctx.resized.swap(false, core::sync::atomic::Ordering::SeqCst) || !self.graphics {
+            return;
+        }
+        self.graphics = false;
+        self.enter_graphics();
+        let this = &*self;
+        framebuffer::with(|fb| {
+            for cy in 0..ROWS {
+                for cx in 0..COLS {
+                    this.paint(fb, cx, cy);
+                }
+            }
+            fb.flush();
+        });
     }
 
     fn set_cell(&mut self, x: i32, y: i32, ch: u8) {
@@ -174,6 +204,10 @@ fn key_code(key: Key) -> i32 {
 impl Drop for KernelHost {
     /// Puts the screen back the way the shell expects it.
     fn drop(&mut self) {
+        if self.standalone {
+            input::take_interrupt();
+            return;
+        }
         CONSOLE.lock().set_attr(self.saved_attr);
         if self.graphics {
             ui::restore_shell_screen();
@@ -201,6 +235,9 @@ impl Host for KernelHost {
     }
 
     fn print(&mut self, text: &str) {
+        if self.standalone {
+            self.enter_graphics();
+        }
         if !self.graphics {
             fb_println!("{}", text);
             return;
@@ -241,12 +278,16 @@ impl Host for KernelHost {
 
     fn set_color(&mut self, color: u8) {
         self.color = color & 0x0F;
-        CONSOLE.lock().set_fg(self.color);
+        if !self.standalone {
+            CONSOLE.lock().set_fg(self.color);
+        }
     }
 
     fn key(&mut self) -> i32 {
         self.flush();
-        match input::try_read_key() {
+        let got = input::try_read_key();
+        self.relayout_if_resized();
+        match got {
             Some(key) => key_code(key),
             None => 0,
         }
@@ -254,14 +295,21 @@ impl Host for KernelHost {
 
     fn wait_key(&mut self) -> i32 {
         self.flush();
-        key_code(input::read_key())
+        loop {
+            self.relayout_if_resized();
+            if let Some(key) = input::try_read_key() {
+                crate::sched::note_progress();
+                return key_code(key);
+            }
+            crate::sched::yield_idle();
+        }
     }
 
     fn sleep(&mut self, ms: u32) {
         self.flush();
         let target = time::uptime_ms() + ms as u64;
-        while time::uptime_ms() < target && !input::interrupt_requested() {
-            x86_64::instructions::hlt();
+        while time::uptime_ms() < target && !input::interrupt_requested() && !crate::sched::window_closed() {
+            crate::sched::yield_idle();
         }
     }
 
@@ -309,6 +357,14 @@ impl Host for KernelHost {
 
     fn emote(&mut self, code: i32) {
         use crate::graphics::buddy::{self, Event};
+        use crate::audio::{effect, Effect};
+        effect(match code {
+            1 => Effect::Score,
+            2 => Effect::Hurt,
+            3 => Effect::Win,
+            4 => Effect::Danger,
+            _ => Effect::Lose,
+        });
         buddy::react(match code {
             1 => Event::Score,
             2 => Event::Hurt,
@@ -319,6 +375,7 @@ impl Host for KernelHost {
     }
 
     fn interrupted(&mut self) -> bool {
+        self.relayout_if_resized();
         // show what has been drawn at most every 16 ms, however many statements ran
         if time::uptime_ms() >= self.last_flush + 16 {
             self.flush();
@@ -326,7 +383,9 @@ impl Host for KernelHost {
                 ui::tick_buddy("script", &self.status_right);
             }
         }
-        input::interrupt_requested()
+        // run on other threads for a moment if this program keeps the CPU
+        crate::sched::yield_if_due();
+        input::interrupt_requested() || crate::sched::window_closed()
     }
 }
 

@@ -12,6 +12,13 @@ use core::sync::atomic::{AtomicBool, AtomicI32, AtomicU8, Ordering};
 use x86_64::instructions::port::Port;
 
 static ENABLED: AtomicBool = AtomicBool::new(false);
+static KEEP: AtomicBool = AtomicBool::new(false);
+
+/// The desktop wants the mouse on for as long as it runs: programs that
+/// switch it off (Doom) leave it alone.
+pub fn keep_enabled(on: bool) {
+    KEEP.store(on, Ordering::SeqCst);
+}
 static DX: AtomicI32 = AtomicI32::new(0);
 static DY: AtomicI32 = AtomicI32::new(0);
 static BUTTONS: AtomicU8 = AtomicU8::new(0);
@@ -101,6 +108,9 @@ pub fn disable() {
 }
 
 fn disable_inner() {
+    if KEEP.load(Ordering::SeqCst) {
+        return;
+    }
     if !ENABLED.swap(false, Ordering::SeqCst) {
         return;
     }

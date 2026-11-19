@@ -75,6 +75,9 @@ pub static COMMANDS: &[Command] = &[
     command!("zsbench", "zsbench", "measure how fast the script VM runs", zsbench),
     command!("3d", "3d [<demo> | tour]", "list or run the 3D demos", demos3d),
     command!("cube", "cube", "show a spinning 3D cube", cube_demo),
+    command!("net", "net", "show the network settings", net_cmd),
+    command!("ping", "ping <host>", "send a ping and time the answer", ping_cmd),
+    command!("fetch", "fetch <http://address>", "download a web page and show its text", fetch_cmd),
     command!("version", "version", "print the kernel name and version", version),
     command!("breakpoint", "breakpoint", "trigger a breakpoint exception", breakpoint),
     command!("panic", "panic", "panic on purpose", crash),
@@ -855,4 +858,63 @@ fn draw_editor(
     out.push_str("\x1b[0m");
     out.push_str(&format!("\x1b[{};{}H", cy - top + 1, cx + 1));
     fb_print!("{}", out);
+}
+
+
+// ----- network -----
+
+fn net_cmd(args: &[String]) -> Result<(), CommandError> {
+    expect_no_args(args)?;
+    crate::net::start();
+    match crate::net::info() {
+        None => fb_println!("no network card found"),
+        Some(i) => {
+            let m = i.mac;
+            fb_println!("link     {}", if i.up { "up" } else { "waiting (getting an address...)" });
+            fb_println!("mac      {:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}", m[0], m[1], m[2], m[3], m[4], m[5]);
+            fb_println!("address  {} ({})", crate::net::format_ip(i.ip), if i.dhcp { "dhcp" } else { "static" });
+            fb_println!("gateway  {}", crate::net::format_ip(i.gateway));
+            fb_println!("dns      {}", crate::net::format_ip(i.dns));
+            fb_println!("packets  {} received, {} sent", i.rx, i.tx);
+        }
+    }
+    Ok(())
+}
+
+fn ping_cmd(args: &[String]) -> Result<(), CommandError> {
+    let [host] = args else { return Err(CommandError::Usage) };
+    crate::net::start();
+    let ip = match crate::net::resolve(host) {
+        Ok(ip) => ip,
+        Err(e) => {
+            fb_println!("{}", e);
+            return Err(CommandError::Reported);
+        }
+    };
+    for _ in 0..3 {
+        match crate::net::ping(ip) {
+            Some(ms) => fb_println!("reply from {}: {} ms", crate::net::format_ip(ip), ms),
+            None => fb_println!("no reply from {}", crate::net::format_ip(ip)),
+        }
+    }
+    Ok(())
+}
+
+fn fetch_cmd(args: &[String]) -> Result<(), CommandError> {
+    let [url] = args else { return Err(CommandError::Usage) };
+    crate::net::start();
+    match crate::net::http::get(url, &mut |_, _| !crate::input::interrupt_requested()) {
+        Ok(resp) => {
+            fb_println!("{} {} bytes, {}", resp.status, resp.body.len(), resp.content_type);
+            let text = String::from_utf8_lossy(&resp.body);
+            for line in text.lines().take(40) {
+                fb_println!("{}", line);
+            }
+            Ok(())
+        }
+        Err(e) => {
+            fb_println!("{}", e);
+            Err(CommandError::Reported)
+        }
+    }
 }

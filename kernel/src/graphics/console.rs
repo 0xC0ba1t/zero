@@ -11,7 +11,7 @@
 
 use crate::graphics::display::Display;
 use crate::graphics::font::Font;
-use crate::graphics::framebuffer::{Framebuffer, FRAMEBUFFER};
+use crate::graphics::framebuffer::{self, Framebuffer, FRAMEBUFFER};
 use crate::graphics::ui;
 use crate::graphics::vga::{self, BACKGROUND, PALETTE};
 use alloc::collections::VecDeque;
@@ -77,6 +77,8 @@ pub struct FbConsole {
     tiles: RefCell<Vec<Option<Vec<u8>>>>,
     /// When the screen last scrolled (milliseconds), to animate only slow output.
     last_scroll: u64,
+    /// Rows the cursor moved because the window was resized (see `take_row_shift`).
+    shift: isize,
 }
 
 impl FbConsole {
@@ -105,40 +107,90 @@ impl FbConsole {
             nparams: 0,
             tiles: RefCell::new(Vec::new()),
             last_scroll: 0,
+            shift: 0,
         }
     }
 
     // ----- public API (locks the framebuffer itself) -----
 
     /// Sizes the console to the framebuffer and clears the screen.
+    /// Works out the cell grid for the current surface size.
+    fn fit_to(&mut self, fb: &Framebuffer) {
+        // the console lives in the window between the title bar and the status bar
+        let lay = ui::layout(fb.width(), fb.height());
+        self.font = Font::console_for_width(fb.width());
+        self.cell_w = self.font.width();
+        self.cell_h = self.font.height() + 2;
+        self.pad_x = 14.min(fb.width() / 20);
+        self.area_y = lay.body_y();
+        self.area_h = lay.body_h();
+        self.oy = self.area_y + 6;
+        self.cols = (fb.width().saturating_sub(2 * self.pad_x) / self.cell_w).max(1);
+        self.rows = (self.area_h.saturating_sub(6) / self.cell_h).max(1);
+    }
+
+    /// The window changed size: lay the text out again, keeping the history.
+    pub fn relayout(&mut self) {
+        if !self.initialized {
+            return self.init();
+        }
+        framebuffer::with(|fb| {
+            let old_rows = self.rows;
+            self.fit_to(fb);
+            for line in self.lines.iter_mut() {
+                line.resize(self.cols, BLANK);
+            }
+            let rows = self.rows;
+            if rows < old_rows {
+                // lose the empty rows below the cursor first, then scroll the top into the history
+                let delta = old_rows - rows;
+                let below = old_rows - 1 - self.row.min(old_rows - 1);
+                let from_bottom = delta.min(below);
+                for _ in 0..from_bottom {
+                    self.lines.pop_back();
+                }
+                let from_top = delta - from_bottom;
+                self.row = self.row.saturating_sub(from_top);
+                self.shift -= from_top as isize;
+            }
+            while self.lines.len() < rows {
+                let line = self.blank_line();
+                self.lines.push_back(line);
+            }
+            self.row = self.row.min(rows - 1);
+            self.col = self.col.min(self.cols.saturating_sub(1));
+            self.view_back = 0;
+            self.cursor_drawn = None;
+            self.tiles.borrow_mut().clear();
+            self.clear_area(fb);
+            self.redraw(fb);
+            self.finish(fb);
+        });
+    }
+
+    /// How far the cursor row moved because of resizes since the last call.
+    pub fn take_row_shift(&mut self) -> isize {
+        core::mem::take(&mut self.shift)
+    }
+
     pub fn init(&mut self) {
-        if let Some(fb) = FRAMEBUFFER.lock().as_mut() {
-            // the console lives in the window between the title bar and the status bar
-            let lay = ui::layout(fb.width(), fb.height());
-            self.font = Font::console_for_width(fb.width());
-            self.cell_w = self.font.width();
-            self.cell_h = self.font.height() + 2;
-            self.pad_x = 14.min(fb.width() / 20);
-            self.area_y = lay.body_y();
-            self.area_h = lay.body_h();
-            self.oy = self.area_y + 6;
-            self.cols = (fb.width().saturating_sub(2 * self.pad_x) / self.cell_w).max(1);
-            self.rows = (self.area_h.saturating_sub(6) / self.cell_h).max(1);
+        framebuffer::with(|fb| {
+            self.fit_to(fb);
             self.initialized = true;
             self.tiles.borrow_mut().clear();
             self.clear_fb(fb);
             self.finish(fb);
-        }
+        });
     }
 
     pub fn clear(&mut self) {
         if !self.initialized {
             return;
         }
-        if let Some(fb) = FRAMEBUFFER.lock().as_mut() {
+        framebuffer::with(|fb| {
             self.clear_fb(fb);
             self.finish(fb);
-        }
+        });
     }
 
     /// Repaints the whole console (e.g. after a script took over the screen).
@@ -146,24 +198,24 @@ impl FbConsole {
         if !self.initialized {
             return;
         }
-        if let Some(fb) = FRAMEBUFFER.lock().as_mut() {
+        framebuffer::with(|fb| {
             self.cursor_drawn = None;
             self.redraw(fb);
             self.finish(fb);
-        }
+        });
     }
 
     pub fn write_str(&mut self, s: &str) {
         if !self.initialized {
             return;
         }
-        if let Some(fb) = FRAMEBUFFER.lock().as_mut() {
+        framebuffer::with(|fb| {
             self.begin(fb);
             let mut out = Out { con: self, fb };
             let _ = fmt::Write::write_str(&mut out, s);
             let Out { con, fb } = out;
             con.finish(fb);
-        }
+        });
     }
 
     /// Size of the live screen in characters.
@@ -205,7 +257,7 @@ impl FbConsole {
         if wanted == self.view_back {
             return;
         }
-        if let Some(fb) = FRAMEBUFFER.lock().as_mut() {
+        framebuffer::with(|fb| {
             self.erase_cursor(fb);
             let diff = wanted as isize - self.view_back as isize;
             if diff.abs() <= 60 {
@@ -214,7 +266,7 @@ impl FbConsole {
             self.view_back = wanted;
             self.redraw(fb);
             self.finish(fb);
-        }
+        });
     }
 
     /// Rewrites an input line that starts at `(col, row)`: draws `text`, wipes
@@ -224,7 +276,7 @@ impl FbConsole {
         if !self.initialized {
             return;
         }
-        if let Some(fb) = FRAMEBUFFER.lock().as_mut() {
+        framebuffer::with(|fb| {
             self.begin(fb);
             self.col = col;
             self.row = row.min(self.rows - 1);
@@ -237,7 +289,7 @@ impl FbConsole {
             }
             self.col = (col + cursor).min(self.cols - 1);
             self.finish(fb);
-        }
+        });
     }
 
     // ----- everything below works on an already locked framebuffer -----
@@ -613,13 +665,13 @@ pub fn _fb_print(args: fmt::Arguments) {
         if !con.initialized {
             return;
         }
-        if let Some(fb) = FRAMEBUFFER.lock().as_mut() {
+        framebuffer::with(|fb| {
             con.begin(fb);
             let mut out = Out { con: &mut con, fb };
             let _ = out.write_fmt(args);
             let Out { con, fb } = out;
             con.finish(fb);
-        }
+        });
     });
 }
 

@@ -36,6 +36,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     let mut frame_allocator = unsafe { BootInfoFrameAllocator::init(&boot_info.memory_regions) };
 
     allocator::init_heap(&mut mapper, &mut frame_allocator).expect("heap initialization failed");
+    zero::sched::init();
+    zero::memory::install(mapper, frame_allocator);
     serial_println!("[kernel] heap initialized ({} MiB)", allocator::HEAP_SIZE / (1024 * 1024));
 
     // The screen: needs the heap (for the shadow buffer), so it comes after it.
@@ -72,6 +74,11 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // First time on this disk: the welcome tour.
     if zero::partition::present() && !zero::onboard::seen() {
         zero::onboard::run();
+    }
+    // The desktop, unless the user chose the plain text shell.
+    if zero::settings::get_or("desktop", "on") != "off" && zero::graphics::framebuffer::with_screen(|_| ()).is_some() {
+        serial_println!("[kernel] starting desktop");
+        zero::gui::run();
     }
     CONSOLE.lock().init();
     zero::graphics::ui::restore_shell_screen();

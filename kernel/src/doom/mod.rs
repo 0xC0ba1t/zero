@@ -21,8 +21,6 @@
 //! without it [`run`] says so.
 
 pub mod libc;
-#[cfg(has_doom)]
-pub mod audio;
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -67,7 +65,20 @@ pub(crate) fn sleep_ms(ms: u32) {
     let end = crate::time::uptime_ms() + ms as u64;
     while crate::time::uptime_ms() < end {
         keep_audio_fed();
-        x86_64::instructions::hlt();
+        crate::sched::yield_idle();
+    }
+    wait_while_hidden();
+}
+
+/// In a desktop window: stands still while the window is minimized.
+fn wait_while_hidden() {
+    if let Some(ctx) = crate::sched::context() {
+        while !ctx.visible.load(Ordering::Relaxed) && !ctx.is_closed() {
+            crate::sched::yield_idle();
+        }
+        if ctx.is_closed() {
+            unsafe { exit_doom(0) };
+        }
     }
 }
 
@@ -79,8 +90,7 @@ pub fn audio_tick() {
 
 /// Tops up the sound card's buffers (a no-op without the engine or a card).
 fn keep_audio_fed() {
-    #[cfg(has_doom)]
-    audio::pump();
+    crate::audio::pump();
 }
 
 // ---------------------------------------------------------------- exit
@@ -171,7 +181,17 @@ pub fn run() -> Result<(), String> {
 
     libc::init_arena(24 * 1024 * 1024);
     let mouse = crate::mouse::enable();
-    let sound = audio::init();
+    let sound = crate::audio::start();
+    #[cfg(has_doom)]
+    {
+        fn doom_mix(out: *mut i16, frames: usize) {
+            unsafe { DG_MixAudio(out, frames as i32) };
+        }
+        extern "C" {
+            fn DG_MixAudio(out: *mut i16, frames: i32);
+        }
+        crate::audio::set_source(if sound { Some(doom_mix) } else { None });
+    }
     crate::serial_println!("[doom] mouse: {}, sound card: {}", if mouse { "yes" } else { "no" }, if sound { "AC97" } else { "none" });
     libc::ERROR_TEXT.lock().clear();
     crate::input::set_doom_active(true);
@@ -191,7 +211,7 @@ pub fn run() -> Result<(), String> {
     }
 
     // back from exit()
-    audio::shutdown();
+    crate::audio::set_source(None);
     crate::mouse::disable();
     crate::input::set_doom_active(false);
     libc::drop_arena();
@@ -248,6 +268,13 @@ pub extern "C" fn DG_SetWindowTitle(_title: *const core::ffi::c_char) {}
 /// Pops the next key event: returns 1 and fills `pressed` / `key`, or 0.
 #[no_mangle]
 pub unsafe extern "C" fn DG_GetKey(pressed: *mut i32, key: *mut u8) -> i32 {
+    if let Some(ctx) = crate::sched::context() {
+        // keys only count while this window is in front
+        if !ctx.focused.load(Ordering::Relaxed) {
+            while crate::input::doom_pop().is_some() {}
+            return 0;
+        }
+    }
     match crate::input::doom_pop() {
         Some((down, code)) => {
             *pressed = down as i32;
@@ -261,6 +288,30 @@ pub unsafe extern "C" fn DG_GetKey(pressed: *mut i32, key: *mut u8) -> i32 {
 /// Polls the mouse: movement since the last call (up is positive) and buttons.
 #[no_mangle]
 pub unsafe extern "C" fn DG_GetMouse(dx: *mut i32, dy: *mut i32, buttons: *mut i32) -> i32 {
+    // in a desktop window the desktop owns the mouse and forwards its movement
+    if let Some(ctx) = crate::sched::context() {
+        let (mut sx, mut sy, mut sb, mut any) = (0, 0, 0u8, false);
+        loop {
+            let ev = ctx.events.lock().pop_front();
+            match ev {
+                Some(crate::gui::Event::MouseRaw { dx: x, dy: y, buttons: b }) => {
+                    sx += x;
+                    sy += y;
+                    sb = b;
+                    any = true;
+                }
+                Some(_) => {}
+                None => break,
+            }
+        }
+        if !any {
+            return 0;
+        }
+        *dx = sx;
+        *dy = sy;
+        *buttons = sb as i32;
+        return 1;
+    }
     match crate::mouse::take() {
         Some((x, y, b)) => {
             *dx = x;
@@ -277,6 +328,7 @@ pub unsafe extern "C" fn DG_GetMouse(dx: *mut i32, dy: *mut i32, buttons: *mut i
 #[no_mangle]
 pub extern "C" fn DG_DrawFrame() {
     keep_audio_fed();
+    wait_while_hidden();
     #[cfg(has_doom)]
     unsafe {
         use crate::graphics::display::Display;

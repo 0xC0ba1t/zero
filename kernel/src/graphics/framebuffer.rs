@@ -20,7 +20,20 @@ use spin::Mutex;
 pub static FRAMEBUFFER: Mutex<Option<Framebuffer>> = Mutex::new(None);
 
 /// Runs `f` on the framebuffer, if there is one.
+///
+/// A thread that owns a window (see `sched::Context`) gets that window's
+/// surface instead of the screen, so code written for the screen (the
+/// console, the games) draws into its window without knowing.
 pub fn with<R>(f: impl FnOnce(&mut Framebuffer) -> R) -> Option<R> {
+    if let Some(ctx) = crate::sched::context() {
+        let mut surface = ctx.surface.lock();
+        return Some(f(&mut surface));
+    }
+    FRAMEBUFFER.lock().as_mut().map(f)
+}
+
+/// Runs `f` on the real screen, whatever thread this is.
+pub fn with_screen<R>(f: impl FnOnce(&mut Framebuffer) -> R) -> Option<R> {
     FRAMEBUFFER.lock().as_mut().map(f)
 }
 
@@ -52,6 +65,8 @@ pub struct Framebuffer {
     /// Rows `dirty_lo..dirty_hi` differ between the shadow buffer and the screen.
     dirty_lo: usize,
     dirty_hi: usize,
+    /// Counts changes, so the desktop can tell which windows need repainting.
+    version: u64,
 }
 
 impl Framebuffer {
@@ -75,6 +90,7 @@ impl Framebuffer {
             clip: (0, 0, 0, 0),
             dirty_lo: 0,
             dirty_hi: 0,
+            version: 0,
         };
         fb.configure(info.width, info.height);
         fb
@@ -138,6 +154,7 @@ impl Framebuffer {
 
     #[inline]
     fn mark_dirty(&mut self, lo: usize, hi: usize) {
+        self.version = self.version.wrapping_add(1);
         if self.dirty_lo == self.dirty_hi {
             self.dirty_lo = lo;
             self.dirty_hi = hi;
@@ -664,4 +681,217 @@ impl Framebuffer {
             self.mark_dirty(lo, hi);
         }
     }
+}
+
+// ---------------------------------------------------------------- desktop support
+
+/// A rectangle on the screen: `(x0, y0, x1, y1)`, the end excluded.
+pub type Rect = (i32, i32, i32, i32);
+
+impl Framebuffer {
+    /// A surface that is not on the screen: a window's pixels. It has the
+    /// same pixel format as `like`, so the desktop can copy it row by row.
+    pub fn offscreen(like: &Framebuffer, w: usize, h: usize) -> Framebuffer {
+        let mut info = like.info;
+        info.width = w;
+        info.height = h;
+        info.stride = w;
+        info.byte_len = w * h * like.bpp;
+        Framebuffer::new(info, &mut [])
+    }
+
+    /// Limits drawing to a screen rectangle.
+    pub fn set_clip_rect(&mut self, r: Rect) {
+        self.clip = (r.0.max(0) as usize, r.1.max(0) as usize, (r.2.max(0) as usize).min(self.width), (r.3.max(0) as usize).min(self.height));
+    }
+
+    /// The current drawing limit: (x0, y0, x1, y1).
+    pub fn clip_bounds(&self) -> (usize, usize, usize, usize) {
+        self.clip
+    }
+
+    pub fn version(&self) -> u64 {
+        self.version
+    }
+
+    pub fn bytes_per_pixel(&self) -> usize {
+        self.bpp
+    }
+
+    pub fn pitch(&self) -> usize {
+        self.pitch
+    }
+
+    pub fn pixels(&self) -> &[u8] {
+        &self.back
+    }
+
+    pub fn pixels_mut(&mut self) -> &mut [u8] {
+        &mut self.back
+    }
+
+    /// Marks rows `lo..hi` as changed (they will be copied to the screen by `flush`).
+    pub fn damage_rows(&mut self, lo: usize, hi: usize) {
+        self.mark_dirty(lo.min(self.height), hi.min(self.height));
+    }
+
+    /// Copies a `w`x`h` piece of another pixel buffer (same format, `src_pitch`
+    /// bytes per row) to `(dx, dy)`, limited to `clip` and the screen.
+    pub fn blit_bytes(&mut self, src: &[u8], src_pitch: usize, sx: usize, sy: usize, w: usize, h: usize, dx: i32, dy: i32, clip: Rect) {
+        let bpp = self.bpp;
+        let x0 = dx.max(clip.0).max(0);
+        let y0 = dy.max(clip.1).max(0);
+        let x1 = (dx + w as i32).min(clip.2).min(self.width as i32);
+        let y1 = (dy + h as i32).min(clip.3).min(self.height as i32);
+        if x1 <= x0 || y1 <= y0 {
+            return;
+        }
+        let n = (x1 - x0) as usize * bpp;
+        for y in y0..y1 {
+            let s = (sy + (y - dy) as usize) * src_pitch + (sx + (x0 - dx) as usize) * bpp;
+            let d = y as usize * self.pitch + x0 as usize * bpp;
+            if s + n > src.len() || d + n > self.back.len() {
+                continue;
+            }
+            self.back[d..d + n].copy_from_slice(&src[s..s + n]);
+        }
+        self.mark_dirty(y0 as usize, y1 as usize);
+    }
+
+    /// Like `blit_bytes`, but the rectangle has rounded corners of radius `r`
+    /// (the corners are left untouched).
+    pub fn blit_rounded(&mut self, src: &[u8], src_pitch: usize, w: usize, h: usize, dx: i32, dy: i32, r: usize, round_top: bool, clip: Rect) {
+        let r = r.min(w / 2).min(h / 2);
+        let bpp = self.bpp;
+        for row in 0..h {
+            let inset = if round_top && row < r {
+                corner_inset(r, r - row)
+            } else if row + r >= h {
+                corner_inset(r, row + r - h + 1)
+            } else {
+                0
+            };
+            let y = dy + row as i32;
+            if y < clip.1 || y >= clip.3 || y < 0 || y >= self.height as i32 {
+                continue;
+            }
+            let x0 = (dx + inset as i32).max(clip.0).max(0);
+            let x1 = (dx + (w - inset) as i32).min(clip.2).min(self.width as i32);
+            if x1 <= x0 {
+                continue;
+            }
+            let n = (x1 - x0) as usize * bpp;
+            let s = row * src_pitch + (x0 - dx) as usize * bpp;
+            let d = y as usize * self.pitch + x0 as usize * bpp;
+            if s + n > src.len() || d + n > self.back.len() {
+                continue;
+            }
+            self.back[d..d + n].copy_from_slice(&src[s..s + n]);
+        }
+        let lo = dy.max(clip.1).max(0) as usize;
+        let hi = (dy + h as i32).min(clip.3).min(self.height as i32).max(0) as usize;
+        if hi > lo {
+            self.mark_dirty(lo, hi);
+        }
+    }
+
+    /// Blends a flat color over a rectangle (`alpha` 0..=255), limited to `clip`.
+    pub fn tint_rect(&mut self, x: i32, y: i32, w: i32, h: i32, color: u32, alpha: u32, clip: Rect) {
+        let bpp = self.bpp;
+        let x0 = x.max(clip.0).max(0);
+        let y0 = y.max(clip.1).max(0);
+        let x1 = (x + w).min(clip.2).min(self.width as i32);
+        let y1 = (y + h).min(clip.3).min(self.height as i32);
+        if x1 <= x0 || y1 <= y0 {
+            return;
+        }
+        let c = self.pack(color);
+        let a = alpha.min(255);
+        let rgb = self.info.pixel_format != PixelFormat::U8;
+        let n = if rgb { bpp.min(3) } else { 1 };
+        if a >= 255 {
+            // opaque: plain stores, one row built then copied
+            let rows = (y1 - y0) as usize;
+            let width = (x1 - x0) as usize;
+            for yy in 0..rows {
+                let base = (y0 as usize + yy) * self.pitch + x0 as usize * bpp;
+                if base + width * bpp > self.back.len() {
+                    break;
+                }
+                for px in self.back[base..base + width * bpp].chunks_exact_mut(bpp) {
+                    px[..n].copy_from_slice(&c[..n]);
+                }
+            }
+            self.mark_dirty(y0 as usize, y1 as usize);
+            return;
+        }
+        // translucent: a lookup table per channel makes each pixel three loads
+        let ia = 255 - a;
+        let mut lut = [[0u8; 256]; 3];
+        for k in 0..n {
+            let add = c[k] as u32 * a + 127;
+            for (v, slot) in lut[k].iter_mut().enumerate() {
+                *slot = ((v as u32 * ia + add) / 255) as u8;
+            }
+        }
+        for yy in y0..y1 {
+            let base = yy as usize * self.pitch + x0 as usize * bpp;
+            let width = (x1 - x0) as usize;
+            if base + width * bpp > self.back.len() {
+                break;
+            }
+            for px in self.back[base..base + width * bpp].chunks_exact_mut(bpp) {
+                for k in 0..n {
+                    px[k] = lut[k][px[k] as usize];
+                }
+            }
+        }
+        self.mark_dirty(y0 as usize, y1 as usize);
+    }
+
+    /// Fills a rectangle with rounded corners with a flat color.
+    pub fn fill_rounded(&mut self, x: i32, y: i32, w: i32, h: i32, r: i32, color: u32, clip: Rect) {
+        let r = r.min(w / 2).min(h / 2).max(0);
+        let c = self.pack(color);
+        let bpp = self.bpp;
+        for row in 0..h {
+            let inset = if row < r {
+                corner_inset(r as usize, (r - row) as usize) as i32
+            } else if row + r >= h {
+                corner_inset(r as usize, (row + r - h + 1) as usize) as i32
+            } else {
+                0
+            };
+            let yy = y + row;
+            if yy < clip.1 || yy >= clip.3 || yy < 0 || yy >= self.height as i32 {
+                continue;
+            }
+            let x0 = (x + inset).max(clip.0).max(0);
+            let x1 = (x + w - inset).min(clip.2).min(self.width as i32);
+            for xx in x0..x1 {
+                let o = yy as usize * self.pitch + xx as usize * bpp;
+                if o + bpp <= self.back.len() {
+                    self.back[o..o + bpp].copy_from_slice(&c[..bpp]);
+                }
+            }
+        }
+        let lo = y.max(clip.1).max(0) as usize;
+        let hi = (y + h).min(clip.3).min(self.height as i32).max(0) as usize;
+        if hi > lo {
+            self.mark_dirty(lo, hi);
+        }
+    }
+}
+
+/// How many pixels a row `d` rows from the edge of a corner of radius `r` is cut.
+fn corner_inset(r: usize, d: usize) -> usize {
+    // the circle's edge: r - sqrt(r^2 - (r-d)^2)... with d counted from the top as r..1
+    let dy = d as i64; // distance from the arc's centre row: 1..=r
+    let r = r as i64;
+    let rr = r * r;
+    let mut x = r;
+    while x > 0 && x * x + (dy - 1) * (dy - 1) > rr {
+        x -= 1;
+    }
+    (r - x) as usize
 }
