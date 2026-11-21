@@ -118,9 +118,10 @@ extern "x86-interrupt" fn page_fault_handler(
 }
 
 extern "x86-interrupt" fn timer_interrupt_handler(
-    _stack_frame: InterruptStackFrame)
+    stack_frame: InterruptStackFrame)
 {
     time::tick();
+    crate::profile::sample(stack_frame.instruction_pointer.as_u64());
 
     unsafe {
         PICS.lock()

@@ -38,6 +38,10 @@ pub struct Settings {
     thumbs: Vec<(String, Vec<u32>, usize, usize)>,
     thumbs_loaded: bool,
     res_choice: usize,
+    user: String,
+    newpw: String,
+    reset_state: u8,
+    reset_step: u64,
     last_arg: Option<String>,
 }
 
@@ -51,6 +55,10 @@ impl Settings {
             thumbs: Vec::new(),
             thumbs_loaded: false,
             res_choice: usize::MAX,
+            user: crate::settings::get_or("user", ""),
+            newpw: String::new(),
+            reset_state: 0,
+            reset_step: 0,
             last_arg: None,
         };
         s.apply_arg(arg);
@@ -433,7 +441,11 @@ impl Settings {
 
     fn users(&mut self, ui: &mut Ui, x: i32, y: i32, w: i32) {
         let th = ui.th;
-        let c = card(ui, x, y, w, 2);
+        if self.reset_state != 0 {
+            self.reset_dialog(ui, x, y, w);
+            return;
+        }
+        let c = card(ui, x, y, w, 3);
         row_label(ui, c.row(0), "Your name", None);
         let before = self.name.clone();
         ui.field(id("name"), (c.x + w - 236, c.y + 9, 220, 30), &mut self.name, "name");
@@ -441,13 +453,90 @@ impl Settings {
             crate::settings::set("name", self.name.trim());
             crate::graphics::buddy::set_name(self.name.trim());
         }
-        row_label(ui, c.row(1), "Account type", None);
-        row_value(ui, c.row(1), "Administrator");
-        ui.text_bold(x, c.end() + 24, "Setup", th.text);
-        ui.muted(x, c.end() + 46, "Walk through the welcome setup again (after a restart).");
-        if ui.button((x, c.end() + 74, 200, 32), "Run Setup Again") {
+        row_label(ui, c.row(1), "Username", None);
+        let before = self.user.clone();
+        ui.field(id("user"), (c.x + w - 236, c.y + 48 + 9, 220, 30), &mut self.user, "username");
+        if self.user != before && !self.user.trim().is_empty() {
+            crate::settings::set("user", self.user.trim());
+        }
+        row_label(ui, c.row(2), "Account type", None);
+        row_value(ui, c.row(2), "Administrator");
+
+        let c2 = card(ui, x, c.end() + 20, w, 2);
+        let has = crate::settings::has_password();
+        row_label(ui, c2.row(0), "Password", None);
+        row_value(ui, c2.row(0), if has { "Set" } else { "None" });
+        row_label(ui, c2.row(1), if has { "New password" } else { "Set a password" }, None);
+        ui.field_ex(id("newpw"), (c2.x + w - 336, c2.y + 48 + 9, 200, 30), &mut self.newpw, "password", true);
+        if ui.button((c2.x + w - 126, c2.y + 48 + 9, 110, 30), if has { "Change" } else { "Set" }) && !self.newpw.is_empty() {
+            crate::settings::set("user", self.user.trim());
+            crate::settings::set_password(&self.newpw);
+            self.newpw.clear();
+            super::notify("Password", "Your password is set. It is asked for at start and on the lock screen.");
+        }
+        if has && ui.button((x, c2.end() + 12, 160, 30), "Remove Password") {
+            crate::settings::set_password("");
+            super::notify("Password", "The password was removed.");
+        }
+
+        let c3 = card(ui, x, c2.end() + if has { 58 } else { 20 }, w, 2);
+        row_label(ui, c3.row(0), "Run setup again", Some("The welcome setup shows on the next start."));
+        if ui.button((c3.x + w - 126, c3.y + 9, 110, 30), "Run Setup") {
             crate::settings::set("desk_setup", "");
             super::notify("Setup", "The welcome setup will run on the next start.");
+        }
+        row_label(ui, c3.row(1), "Factory reset", Some("Erase all files and settings."));
+        let r = (c3.x + w - 126, c3.y + 48 + 9, 110, 30);
+        let hover = ui.hovered(r);
+        let resp = ui.interact(id("factory"), r);
+        ui.cv.round(r.0, r.1, r.2, r.3, 6, if hover { 0xE5483D } else { 0xFF453A });
+        let f = ui.font;
+        let tw = gfx::text_width(&f, "Erase...");
+        ui.cv.text(r.0 + (r.2 - tw) / 2, r.1 + (r.3 - f.height() as i32) / 2 - 1, "Erase...", &f, 0xFFFFFF);
+        if resp.clicked {
+            self.reset_state = 1;
+        }
+        let _ = th;
+    }
+
+    /// The confirmation and progress of a factory reset.
+    fn reset_dialog(&mut self, ui: &mut Ui, x: i32, y: i32, w: i32) {
+        let th = ui.th;
+        let (dx, dy, dw, dh) = (x + (w - 440).max(0) / 2, y + 30, 440.min(w), 230);
+        ui.cv.shadow(dx, dy + 4, dw, dh, 14, 18, 90);
+        ui.cv.round_border(dx, dy, dw, dh, 14, if th.dark { 0x2B2C31 } else { 0xFFFFFF }, th.control_border);
+        ui.cv.circle(dx + dw / 2, dy + 40, 18, 0xFF453A);
+        ui.cv.rect(dx + dw / 2 - 2, dy + 30, 4, 14, 0xFFFFFF);
+        ui.cv.rect(dx + dw / 2 - 2, dy + 48, 4, 4, 0xFFFFFF);
+        if self.reset_state == 1 {
+            let bf = gfx::font(20, true);
+            ui.cv.text_center(dx + dw / 2, dy + 70, "Erase everything?", &bf, th.text);
+            ui.wrapped(dx + 24, dy + 102, dw - 48, "This deletes every file, your account, password, settings and what Bit learned, then restarts zero as a brand new machine. It cannot be undone.", th.text2);
+            if ui.button((dx + 24, dy + dh - 56, 150, 34), "Cancel") {
+                self.reset_state = 0;
+            }
+            let r = (dx + dw - 24 - 190, dy + dh - 56, 190, 34);
+            let resp = ui.interact(id("factory_yes"), r);
+            ui.cv.round(r.0, r.1, r.2, r.3, 6, if resp.hover { 0xE5483D } else { 0xFF453A });
+            let f = ui.font;
+            let tw = gfx::text_width(&f, "Erase Everything");
+            ui.cv.text(r.0 + (r.2 - tw) / 2, r.1 + (r.3 - f.height() as i32) / 2 - 1, "Erase Everything", &f, 0xFFFFFF);
+            if resp.clicked {
+                self.reset_state = 2;
+                self.reset_step = 0;
+            }
+        } else {
+            let bf = gfx::font(20, true);
+            ui.cv.text_center(dx + dw / 2, dy + 70, "Erasing...", &bf, th.text);
+            ui.muted(dx + 24, dy + 112, "Please do not turn the machine off.");
+            let frac = (self.reset_step * 1000 / crate::partition::WIPE_STEPS) as i32;
+            ui.progress((dx + 24, dy + 150, dw - 48, 10), frac);
+            let done = crate::partition::wipe_step(self.reset_step);
+            self.reset_step += 1;
+            ui.animate(16);
+            if done {
+                crate::power::reboot();
+            }
         }
     }
 }
@@ -519,8 +608,17 @@ fn dock_pane(ui: &mut Ui, x: i32, y: i32, w: i32) {
     }
     row_label(ui, c2.row(2), "Hot corner", Some("Top left corner opens Mission Control"));
     let th = ui.th;
-    ui.text_bold(x, c2.end() + 24, "Window snapping", th.text);
-    ui.wrapped(x, c2.end() + 48, w, "Drag a window to the left or right edge to fill half the screen, to a corner for a quarter, or to the top to fill it. Double-click a title bar to zoom.", th.text2);
+    let c3 = card(ui, x, c2.end() + 20, w, 1);
+    row_label(ui, c3.row(0), "Pointer speed", None);
+    let mut speed = crate::mouse::SPEED.load(Ordering::Relaxed);
+    if ui.slider(id("mousespeed"), (c3.x + w - 236, c3.y + 12, 210, 24), &mut speed, 10, 200) {
+        crate::mouse::SPEED.store(speed, Ordering::Relaxed);
+    }
+    if ui.inp.released {
+        crate::settings::set("mouse_speed", &alloc::format!("{}", crate::mouse::SPEED.load(Ordering::Relaxed)));
+    }
+    ui.text_bold(x, c3.end() + 24, "Window snapping", th.text);
+    ui.wrapped(x, c3.end() + 48, w, "Drag a window to the left or right edge to fill half the screen, to a corner for a quarter, or to the top to fill it. Double-click a title bar to zoom.", th.text2);
 }
 
 fn sound(ui: &mut Ui, x: i32, y: i32, w: i32) {

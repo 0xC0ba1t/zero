@@ -572,23 +572,24 @@ impl DeskBuddy {
 
     pub fn draw(&self, cv: &mut Canvas, bar: Rect, th: &Theme, f: &Font) {
         let (lx, lw) = self.lane(bar);
-        let (_, ch) = buddy::SPRITE;
-        let h = (ch * SCALE) as i32 + 60;
+        let (cw, ch) = buddy::SPRITE;
+        // draw Bit into a picture just its own size, then put that on the screen
+        let (sw_, sh_) = ((cw * SCALE) as i32 + 4, (ch * SCALE) as i32 + 60);
         let key = 0xFF00FF;
-        let Some(mut fb) = framebuffer::with_screen(|s| Framebuffer::offscreen32(s, lw as usize, h as usize)) else { return };
+        let Some(mut fb) = framebuffer::with_screen(|s| Framebuffer::offscreen32(s, sw_ as usize, sh_ as usize)) else { return };
         fb.pixels32().fill(key);
-        buddy::draw(&mut fb, 0, lw as usize, h as usize, SCALE);
+        buddy::draw(&mut fb, 0, sw_ as usize, sh_ as usize, SCALE);
+        let bx_ = buddy::screen_x(lx as usize, lw as usize, SCALE) as i32;
         let floor = bar.1 + 2;
-        let top = floor - h;
+        let top = floor - sh_;
         let px = fb.pixels32_ref();
-        // a soft shadow under Bit, then Bit
         let r = self.rect(bar);
         cv.round_a(r.0 + 2, floor - 3, r.2 - 4, 4, 2, 0x000000, 60);
-        for y in 0..h {
-            for x in 0..lw {
-                let c = px[(y * lw + x) as usize];
+        for y in 0..sh_ {
+            for x in 0..sw_ {
+                let c = px[(y * sw_ + x) as usize];
                 if c != key {
-                    cv.put(lx + x, top + y, c, 255);
+                    cv.put(bx_ + x, top + y, c, 255);
                 }
             }
         }

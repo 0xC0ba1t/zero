@@ -56,6 +56,9 @@ pub fn load_settings() {
     if let Some(v) = get("dock_size") {
         DOCK_SIZE.store(v.parse().unwrap_or(50).clamp(32, 80), Ordering::Relaxed);
     }
+    if let Some(v) = get("mouse_speed") {
+        crate::mouse::SPEED.store(v.parse().unwrap_or(35).clamp(10, 200), Ordering::Relaxed);
+    }
     theme::load();
 }
 
@@ -263,6 +266,8 @@ pub struct Desktop {
     volume_drag: bool,
     /// The time this frame is drawn at (the same for every processor).
     frame_now: u64,
+    /// Whether the trash has something in it (checked once a second, not on every paint).
+    trash_full: bool,
     th: Theme,
     theme_gen: u32,
     f: Font,
@@ -302,11 +307,16 @@ pub fn run() {
     let mut d = Desktop::new(sw, sh);
     sched::enable_preemption(true);
     // first time: the welcome setup
-    if crate::settings::get("desk_setup").is_none() {
+    let first_run = crate::settings::get("desk_setup").map(|v| v.is_empty()).unwrap_or(true);
+    if first_run {
         super::onboard::run(sw, sh);
         d.th = theme::current();
         d.theme_gen = theme::GENERATION.load(Ordering::Relaxed);
         d.make_wallpaper();
+        d.damage_all();
+    }
+    if !first_run && crate::settings::has_password() {
+        super::onboard::lock_screen(sw, sh);
         d.damage_all();
     }
     d.ensure_folders();
@@ -358,6 +368,7 @@ impl Desktop {
             hover_win: None,
             volume_drag: false,
             frame_now: 0,
+            trash_full: false,
             th: theme::current(),
             theme_gen: theme::GENERATION.load(Ordering::Relaxed),
             f: gfx::font(16, false),
@@ -1103,6 +1114,11 @@ impl Desktop {
                 self.damage_rect((self.sw - 320, 0, self.sw, MENU_H));
             }
             sched::reap();
+            let full = FILESYSTEM.lock().as_ref().and_then(|fs| fs.list("/Trash").ok()).map(|l| !l.is_empty()).unwrap_or(false);
+            if full != self.trash_full {
+                self.trash_full = full;
+                self.damage_dock();
+            }
             if now >= self.icons_checked + 2000 {
                 self.icons_checked = now;
                 let names: Vec<String> = FILESYSTEM.lock().as_ref().and_then(|fs| fs.list("/Desktop").ok()).unwrap_or_default();
@@ -1218,10 +1234,10 @@ impl Desktop {
             self.buttons = b;
             return;
         }
-        let accel = |d: i32| d + d.signum() * (d * d / 24).min(d.abs() * 2);
+        let (sx, sy) = crate::mouse::scale(dx, dy);
         let old = self.mouse;
-        let nx = (old.0 + accel(dx)).clamp(0, self.sw - 1);
-        let ny = (old.1 - accel(dy)).clamp(0, self.sh - 1);
+        let nx = (old.0 + sx).clamp(0, self.sw - 1);
+        let ny = (old.1 - sy).clamp(0, self.sh - 1);
         self.mouse = (nx, ny);
         let prev = self.buttons;
         self.buttons = b;
@@ -1230,11 +1246,14 @@ impl Desktop {
             self.damage_pointer((nx, ny));
             self.on_move();
         }
+        let (pe, re) = crate::mouse::last_edges();
         for (bit, button) in [(1u8, 0u8), (2, 1), (4, 2)] {
-            if b & bit != 0 && prev & bit == 0 {
+            let was = prev & bit != 0;
+            let press = !was && (b & bit != 0 || pe & bit != 0);
+            if press {
                 self.on_press(button);
             }
-            if b & bit == 0 && prev & bit != 0 {
+            if (was || press) && (b & bit == 0 || re & bit != 0) && !(b & bit != 0 && !was) {
                 self.on_release(button);
             }
         }
@@ -2526,9 +2545,8 @@ impl Desktop {
         framebuffer::with_screen(|fb| {
             for d in &rects {
                 let (x0, y0, x1, y1) = (d.0.max(0) as usize, d.1.max(0) as usize, d.2.min(sw) as usize, d.3.min(sh) as usize);
-                fb.put32_rect(scr, x0, y0, x1, y1);
+                fb.present32(scr, x0, y0, x1, y1);
             }
-            fb.flush();
         });
         FRAME_US.store(((crate::time::uptime_ms() - started) * 1000) as u32, Ordering::Relaxed);
     }
@@ -2879,7 +2897,7 @@ fn paint_top(d: &Desktop, cv: &mut Canvas, clip: Bx) {
 
 fn paint_menubar(d: &Desktop, cv: &mut Canvas) {
     let th = d.th;
-    cv.blur(0, 0, d.sw, MENU_H, 10);
+    cv.blur_fast(0, 0, d.sw, MENU_H, 10);
     cv.rect_a(0, 0, d.sw, MENU_H, th.bar_tint, th.bar_alpha);
     cv.hline(0, MENU_H - 1, d.sw, 0x000000, 40);
     let fg = th.text;
@@ -2980,10 +2998,10 @@ fn paint_dock(d: &Desktop, cv: &mut Canvas) {
     let (bar, items) = d.dock_layout();
     let now = d.frame_now;
     cv.shadow(bar.0, bar.1 + 4, bar.2, bar.3, 18, 24, 90);
-    cv.blur(bar.0, bar.1, bar.2, bar.3, 12);
+    cv.blur_fast(bar.0, bar.1, bar.2, bar.3, 12);
     cv.round_a(bar.0, bar.1, bar.2, bar.3, 18, th.bar_tint, (th.bar_alpha + 30).min(255));
     cv.round_outline(bar.0, bar.1, bar.2, bar.3, 18, if th.dark { 0xFFFFFF } else { 0x000000 }, if th.dark { 45 } else { 30 });
-    let trash_full = FILESYSTEM.lock().as_ref().and_then(|fs| fs.list("/Trash").ok()).map(|l| !l.is_empty()).unwrap_or(false);
+    let trash_full = d.trash_full;
     for it in items.iter() {
         match *it {
             DockItem::App(app, r, k) => {

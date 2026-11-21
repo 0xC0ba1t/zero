@@ -75,6 +75,7 @@ pub static COMMANDS: &[Command] = &[
     command!("zsbench", "zsbench", "measure how fast the script VM runs", zsbench),
     command!("3d", "3d [<demo> | tour]", "list or run the 3D demos", demos3d),
     command!("cube", "cube", "show a spinning 3D cube", cube_demo),
+    command!("prof", "prof [on|off|clear|show]", "sample where the CPU spends its time (addresses go to serial too)", prof_cmd),
     command!("net", "net", "show the network settings", net_cmd),
     command!("ping", "ping <host>", "send a ping and time the answer", ping_cmd),
     command!("fetch", "fetch <http://address>", "download a web page and show its text", fetch_cmd),
@@ -917,4 +918,27 @@ fn fetch_cmd(args: &[String]) -> Result<(), CommandError> {
             Err(CommandError::Reported)
         }
     }
+}
+
+
+// ----- profiler -----
+
+fn prof_cmd(args: &[String]) -> Result<(), CommandError> {
+    match args.first().map(|s| s.as_str()) {
+        Some("on") => {
+            crate::profile::clear();
+            crate::profile::enable(true);
+            fb_println!("sampling... run something, then `prof show`");
+        }
+        Some("off") => crate::profile::enable(false),
+        Some("clear") => crate::profile::clear(),
+        _ => {
+            fb_println!("{} samples; busiest places (address, share):", crate::profile::samples());
+            for (addr, permille) in crate::profile::top(24) {
+                fb_println!("  {:#x}  {}.{}%", addr, permille / 10, permille % 10);
+                crate::serial_println!("[prof] {:#x} {}.{}%", addr, permille / 10, permille % 10);
+            }
+        }
+    }
+    Ok(())
 }

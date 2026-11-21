@@ -10,15 +10,15 @@ build:
 
 # UEFI boot: honors the 1920x1080 request in build.rs
 run: build
-	$(QEMU) -m 256M -smp 4 -serial stdio $(AUDIO) -bios $(OVMF) -drive format=raw,file=$(IMG)/uefi.img
+	$(QEMU) -accel kvm -accel tcg -m 256M -smp 4 -serial stdio $(AUDIO) -bios $(OVMF) -drive format=raw,file=$(IMG)/uefi.img
 
 # legacy BIOS boot (capped at 1280x720 by the bootloader)
 run-bios: build
-	$(QEMU) -m 256M -smp 4 -serial stdio $(AUDIO) -drive format=raw,file=$(IMG)/bios.img
+	$(QEMU) -accel kvm -accel tcg -m 256M -smp 4 -serial stdio $(AUDIO) -drive format=raw,file=$(IMG)/bios.img
 
 run-release:
 	cargo build --release
-	$(QEMU) -m 256M -smp 4 -serial stdio $(AUDIO) -bios $(OVMF) -drive format=raw,file=target/x86_64-zero/release/uefi.img
+	$(QEMU) -accel kvm -accel tcg -m 256M -smp 4 -serial stdio $(AUDIO) -bios $(OVMF) -drive format=raw,file=target/x86_64-zero/release/uefi.img
 
 build-release:
 	cargo build --release

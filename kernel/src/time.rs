@@ -19,6 +19,8 @@ pub fn ticks() -> u64 {
 static TSC_PER_MS: AtomicU64 = AtomicU64::new(0);
 /// Timestamp counter value at calibration (time zero).
 static TSC_BASE: AtomicU64 = AtomicU64::new(0);
+/// 2^40 / cycles per millisecond: turns a division into a multiply and a shift.
+static TSC_MUL: AtomicU64 = AtomicU64::new(0);
 
 /// Milliseconds since boot.
 ///
@@ -31,7 +33,8 @@ pub fn uptime_ms() -> u64 {
         return ticks() * 1000 / TICK_HZ as u64;
     }
     let now = unsafe { core::arch::x86_64::_rdtsc() };
-    now.wrapping_sub(TSC_BASE.load(Ordering::Relaxed)) / per_ms
+    let delta = now.wrapping_sub(TSC_BASE.load(Ordering::Relaxed));
+    (((delta as u128) * (TSC_MUL.load(Ordering::Relaxed) as u128)) >> 40) as u64
 }
 
 /// Measures how fast the timestamp counter runs by timing a 10 ms one-shot of
@@ -65,6 +68,7 @@ pub fn calibrate_tsc() {
         let per_ms = (end - start) / 10;
         if per_ms > 0 {
             TSC_BASE.store(end, Ordering::Relaxed);
+            TSC_MUL.store((1u64 << 40) / per_ms, Ordering::Relaxed);
             TSC_PER_MS.store(per_ms, Ordering::Relaxed);
         }
     }

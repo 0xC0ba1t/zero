@@ -99,13 +99,42 @@ pub fn corner_table(r: i32) -> &'static [u8] {
 
 // ---- proportional text metrics ---------------------------------------------------
 
-/// (left trim, advance) per glyph for each font; computed on first use.
-static METRICS: Mutex<Vec<(u8, u8, Vec<(u8, u8)>)>> = Mutex::new(Vec::new());
+/// (left trim, advance) of every printable glyph, one table per font size and
+/// weight; each is computed once, on first use, and then read without locking.
+static METRIC_TABLES: [spin::Once<[(u8, u8); 94]>; 8] = [const { spin::Once::new() }; 8];
 
-fn font_key(f: &Font) -> (u8, u8) {
-    (f.height() as u8, if f.is_bold() { 1 } else { 0 })
+fn metric_table(f: &Font) -> &'static [(u8, u8); 94] {
+    let size = match f.height() {
+        0..=17 => 0,
+        18..=21 => 1,
+        22..=27 => 2,
+        _ => 3,
+    };
+    let idx = size * 2 + f.is_bold() as usize;
+    METRIC_TABLES[idx].call_once(|| {
+        let full = f.width() as u8;
+        let mut table = [(0u8, full); 94];
+        let spacing = (f.height() / 9).max(1);
+        for (k, entry) in table.iter_mut().enumerate() {
+            let raster = f.raster((k as u8 + 33) as char);
+            let (mut lo, mut hi) = (usize::MAX, 0);
+            for row in raster.iter() {
+                for (x, &a) in row.iter().enumerate() {
+                    if a > 40 {
+                        lo = lo.min(x);
+                        hi = hi.max(x + 1);
+                    }
+                }
+            }
+            if lo != usize::MAX {
+                *entry = (lo as u8, (hi - lo + spacing) as u8);
+            }
+        }
+        table
+    })
 }
 
+#[inline]
 fn glyph_metrics(f: &Font, c: char) -> (i32, i32) {
     let full = f.width() as i32;
     if c == ' ' {
@@ -115,36 +144,7 @@ fn glyph_metrics(f: &Font, c: char) -> (i32, i32) {
     if !(33..127).contains(&code) {
         return (0, full);
     }
-    let key = font_key(f);
-    let mut m = METRICS.lock();
-    let idx = match m.iter().position(|(h, b, _)| (*h, *b) == key) {
-        Some(i) => i,
-        None => {
-            let mut table = Vec::with_capacity(94);
-            for ch in 33u8..127 {
-                let raster = f.raster(ch as char);
-                let mut lo = usize::MAX;
-                let mut hi = 0;
-                for row in raster.iter() {
-                    for (x, &a) in row.iter().enumerate() {
-                        if a > 40 {
-                            lo = lo.min(x);
-                            hi = hi.max(x + 1);
-                        }
-                    }
-                }
-                if lo == usize::MAX {
-                    table.push((0, full as u8));
-                } else {
-                    let spacing = (f.height() / 9).max(1);
-                    table.push((lo as u8, (hi - lo + spacing) as u8));
-                }
-            }
-            m.push((key.0, key.1, table));
-            m.len() - 1
-        }
-    };
-    let (lo, adv) = m[idx].2[(code - 33) as usize];
+    let (lo, adv) = metric_table(f)[(code - 33) as usize];
     (lo as i32, adv as i32)
 }
 
@@ -576,6 +576,23 @@ impl<'a> Canvas<'a> {
         }
     }
 
+    /// Large text: the 32 px font enlarged by a whole factor with hard edges, so it stays
+    /// sharp (smooth enlarging looks blurry). Centred on `cx`, top at `y`; returns the width.
+    pub fn text_big(&mut self, cx: i32, y: i32, s: &str, scale: i32, color: u32) -> i32 {
+        let f = font(32, true);
+        let tw = text_width(&f, s);
+        let (sw, sh) = ((tw + 4) as usize, 40usize);
+        let mut small = alloc::vec![0u32; sw * sh];
+        {
+            let mut sc = Canvas::new(&mut small, sw, sh);
+            sc.text(2, 2, s, &f, 0xFFFFFF);
+        }
+        let mask: alloc::vec::Vec<u32> = small.iter().map(|&p| ((p & 0xFF) << 24) | (color & 0xFFFFFF)).collect();
+        let (dw, dh) = (sw as i32 * scale, sh as i32 * scale);
+        self.blit_scaled((cx - dw / 2, y, dw, dh), &mask, sw, sh, false, true);
+        dw
+    }
+
     /// Draws `src` scaled into a rectangle (bilinear when `smooth`), with
     /// `alpha_channel` using the top byte as alpha.
     pub fn blit_scaled(&mut self, dst: Rect, src: &[u32], sw: usize, sh: usize, smooth: bool, alpha_channel: bool) {
@@ -639,36 +656,57 @@ impl<'a> Canvas<'a> {
         let y0 = (sy - blur).max(self.clip.1);
         let y1 = (sy + h + blur).min(self.clip.3);
         let r = r.min(w / 2).min(h / 2);
-        let b2 = (blur * blur) as i64;
+        let falloff = shadow_falloff(blur, strength);
         for yy in y0..y1 {
             let dyy = if yy < sy + r { sy + r - yy } else if yy >= sy + h - r { yy - (sy + h - r - 1) } else { 0 };
-            let in_object_rows = yy >= ay + r && yy < ay + h - r;
+            let covered = yy >= ay + r && yy < ay + h - r;
             let base = yy as usize * self.stride;
-            let mut xx = x0;
-            while xx < x1 {
-                // the object covers this run: jump over it
-                if in_object_rows && xx >= ax && xx < ax + w {
-                    xx = ax + w;
-                    continue;
-                }
-                let dx = if xx < ax + r { ax + r - xx } else if xx >= ax + w - r { xx - (ax + w - r - 1) } else { 0 };
-                let d = if dx > 0 && dyy > 0 { isqrt((dx * dx + dyy * dyy) as i64) as i32 - r } else { dx.max(dyy) - r };
-                let d = d.max(0) as i64;
-                if d < blur as i64 {
-                    let t = b2 - d * d;
-                    let a = self.a(((t * t * strength as i64) / (b2 * b2).max(1)).min(255) as u32);
+            // the straight part (between the corners) has one opacity per row: fill it in one go
+            let (mid0, mid1) = ((ax + r).max(x0), (ax + w - r).min(x1));
+            if mid1 > mid0 && !covered {
+                let d = (dyy - r).max(0) as usize;
+                if d < falloff.len() {
+                    let a = self.a(falloff[d] as u32);
                     if a > 0 {
-                        let i = base + xx as usize;
-                        self.px[i] = blend(self.px[i], 0, a);
+                        self.span(mid0, mid1, yy, 0, a);
                     }
                 }
-                xx += 1;
+            }
+            // left and right of the straight part
+            for (zs, ze) in [(x0, (ax + r).min(x1)), ((ax + w - r).max(x0), x1)] {
+                let mut xx = zs;
+                while xx < ze {
+                    if covered && xx >= ax && xx < ax + w {
+                        xx = ax + w;
+                        continue;
+                    }
+                    let dx = if xx < ax + r { ax + r - xx } else if xx >= ax + w - r { xx - (ax + w - r - 1) } else { 0 };
+                    let d = if dx > 0 && dyy > 0 { isqrt((dx * dx + dyy * dyy) as i64) as i32 - r } else { dx.max(dyy) - r };
+                    let d = d.max(0) as usize;
+                    if d < falloff.len() {
+                        let a = self.a(falloff[d] as u32);
+                        if a > 0 {
+                            let i = base + xx as usize;
+                            self.px[i] = blend(self.px[i], 0, a);
+                        }
+                    }
+                    xx += 1;
+                }
             }
         }
     }
 
     /// Blurs a rectangle in place (two box passes each way): frosted glass.
     pub fn blur(&mut self, x: i32, y: i32, w: i32, h: i32, radius: i32) {
+        self.blur_passes(x, y, w, h, radius, 2);
+    }
+
+    /// A cheaper blur (one box pass each way) for things that repaint often.
+    pub fn blur_fast(&mut self, x: i32, y: i32, w: i32, h: i32, radius: i32) {
+        self.blur_passes(x, y, w, h, radius, 1);
+    }
+
+    fn blur_passes(&mut self, x: i32, y: i32, w: i32, h: i32, radius: i32, passes: usize) {
         let (ax, ay) = (x + self.ox, y + self.oy);
         let x0 = ax.max(self.clip.0).max(0);
         let y0 = ay.max(self.clip.1).max(0);
@@ -678,46 +716,87 @@ impl<'a> Canvas<'a> {
             return;
         }
         let (bw, bh) = ((x1 - x0) as usize, (y1 - y0) as usize);
-        let mut buf = vec![0u32; bw.max(bh)];
-        for _pass in 0..2 {
-            for yy in y0..y1 {
-                let row = yy as usize * self.stride + x0 as usize;
-                buf[..bw].copy_from_slice(&self.px[row..row + bw]);
-                box_line(&buf[..bw], &mut self.px[row..row + bw], 1, radius as usize);
-            }
-            for xx in x0..x1 {
-                for i in 0..bh {
-                    buf[i] = self.px[(y0 as usize + i) * self.stride + xx as usize];
+        let r = (radius as usize).min(bw / 2).min(bh / 2).max(1);
+        let window = (2 * r + 1) as u32;
+        // dividing by the window is a multiply and a shift
+        let mul = (65536 + window - 1) / window;
+        let mut a_buf = vec![0u32; bw * bh];
+        let mut b_buf = vec![0u32; bw * bh];
+        for row in 0..bh {
+            let s0 = (y0 as usize + row) * self.stride + x0 as usize;
+            a_buf[row * bw..(row + 1) * bw].copy_from_slice(&self.px[s0..s0 + bw]);
+        }
+        let mut rs = vec![0u32; bw];
+        let mut gs = vec![0u32; bw];
+        let mut bs = vec![0u32; bw];
+        for _ in 0..passes {
+            // along each row
+            for row in 0..bh {
+                let src = &a_buf[row * bw..(row + 1) * bw];
+                let dst = &mut b_buf[row * bw..(row + 1) * bw];
+                let (mut sr, mut sg, mut sb) = (0u32, 0u32, 0u32);
+                for k in 0..=2 * r {
+                    let p = src[k.saturating_sub(r).min(bw - 1)];
+                    sr += (p >> 16) & 255;
+                    sg += (p >> 8) & 255;
+                    sb += p & 255;
                 }
-                let mut out = vec![0u32; bh];
-                box_line(&buf[..bh], &mut out, 1, radius as usize);
-                for i in 0..bh {
-                    self.px[(y0 as usize + i) * self.stride + xx as usize] = out[i];
+                for i in 0..bw {
+                    dst[i] = (((sr * mul) >> 16) << 16) | (((sg * mul) >> 16) << 8) | ((sb * mul) >> 16);
+                    let out = src[i.saturating_sub(r)];
+                    let inn = src[(i + r + 1).min(bw - 1)];
+                    sr = sr + ((inn >> 16) & 255) - ((out >> 16) & 255);
+                    sg = sg + ((inn >> 8) & 255) - ((out >> 8) & 255);
+                    sb = sb + (inn & 255) - (out & 255);
                 }
             }
+            // down each column, all columns at once so memory is read in order
+            rs.fill(0);
+            gs.fill(0);
+            bs.fill(0);
+            for k in 0..=2 * r {
+                let row = k.saturating_sub(r).min(bh - 1);
+                for (i, &p) in b_buf[row * bw..(row + 1) * bw].iter().enumerate() {
+                    rs[i] += (p >> 16) & 255;
+                    gs[i] += (p >> 8) & 255;
+                    bs[i] += p & 255;
+                }
+            }
+            for row in 0..bh {
+                let dst = &mut a_buf[row * bw..(row + 1) * bw];
+                for i in 0..bw {
+                    dst[i] = (((rs[i] * mul) >> 16) << 16) | (((gs[i] * mul) >> 16) << 8) | ((bs[i] * mul) >> 16);
+                }
+                let out_row = row.saturating_sub(r);
+                let in_row = (row + r + 1).min(bh - 1);
+                let (out, inn) = (&b_buf[out_row * bw..(out_row + 1) * bw], &b_buf[in_row * bw..(in_row + 1) * bw]);
+                for i in 0..bw {
+                    rs[i] = rs[i] + ((inn[i] >> 16) & 255) - ((out[i] >> 16) & 255);
+                    gs[i] = gs[i] + ((inn[i] >> 8) & 255) - ((out[i] >> 8) & 255);
+                    bs[i] = bs[i] + (inn[i] & 255) - (out[i] & 255);
+                }
+            }
+        }
+        for row in 0..bh {
+            let d0 = (y0 as usize + row) * self.stride + x0 as usize;
+            self.px[d0..d0 + bw].copy_from_slice(&a_buf[row * bw..(row + 1) * bw]);
         }
     }
 }
 
-fn box_line(src: &[u32], dst: &mut [u32], _step: usize, r: usize) {
-    let n = src.len();
-    let (mut sr, mut sg, mut sb) = (0u32, 0u32, 0u32);
-    let window = (2 * r + 1) as u32;
-    let get = |i: isize| -> u32 { src[i.clamp(0, n as isize - 1) as usize] };
-    for i in -(r as isize)..=(r as isize) {
-        let p = get(i);
-        sr += (p >> 16) & 255;
-        sg += (p >> 8) & 255;
-        sb += p & 255;
+/// The shadow's opacity (0..255) at each distance from the edge, cached per blur and strength.
+static FALLOFFS: Mutex<Vec<(i32, u32, &'static [u8])>> = Mutex::new(Vec::new());
+
+fn shadow_falloff(blur: i32, strength: u32) -> &'static [u8] {
+    let mut cache = FALLOFFS.lock();
+    if let Some((_, _, t)) = cache.iter().find(|(b, s, _)| *b == blur && *s == strength) {
+        return t;
     }
-    for i in 0..n {
-        dst[i] = ((sr / window) << 16) | ((sg / window) << 8) | (sb / window);
-        let out = get(i as isize - r as isize);
-        let inn = get(i as isize + r as isize + 1);
-        sr = sr + ((inn >> 16) & 255) - ((out >> 16) & 255);
-        sg = sg + ((inn >> 8) & 255) - ((out >> 8) & 255);
-        sb = sb + (inn & 255) - (out & 255);
-    }
+    let b2 = (blur * blur) as i64;
+    let table: Vec<u8> = (0..blur as i64).map(|d| (((b2 - d * d).pow(2) * strength as i64) / (b2 * b2).max(1)).min(255) as u8).collect();
+    let leaked: &'static [u8] = Vec::leak(table);
+    cache.push((blur, strength, leaked));
+    leaked
 }
 
 /// Ease-out cubic, `t` in 0..=1000.

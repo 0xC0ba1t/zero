@@ -49,21 +49,42 @@ impl Stars {
         }
     }
 
-    fn draw(&self, cv: &mut Canvas, w: i32, h: i32, tint: u32) {
+    /// Draws the stars as plain one pixel streaks written straight into the picture
+    /// (no blending: this runs for hundreds of stars every frame).
+    fn draw(&self, cv: &mut Canvas, dirty: &mut Dirty, w: i32, h: i32, tint: u32) {
         let (cx, cy) = (w / 2, h / 2);
         let focal = w.max(h) / 7;
+        let stride = cv.stride;
+        let near = gfx::mix(0xFFFFFF, tint, 60);
+        let px = &mut *cv.px;
         for &(x, y, z, pz) in &self.s {
-            let p = |zz: i32| ((cx + x * focal / zz.max(1)) * 16, (cy + y * focal / zz.max(1)) * 16);
-            let (x1, y1) = p(z);
-            let (x0, y0) = p(pz + (pz - z) * 2);
-            let bright = ((1000 - z) * 255 / 1000).clamp(20, 255) as u32;
-            let c = gfx::mix(0x000000, gfx::mix(0xFFFFFF, tint, 60), bright);
-            if x1 / 16 < -10 || x1 / 16 > w + 10 || y1 / 16 < -10 || y1 / 16 > h + 10 {
+            let (x1, y1) = (cx + x * focal / z.max(1), cy + y * focal / z.max(1));
+            if x1 < 0 || x1 >= w || y1 < 0 || y1 >= h {
                 continue;
             }
-            cv.line16(x0, y0, x1, y1, c, 255);
-            if z < 200 {
-                cv.circle(x1 / 16, y1 / 16, 1, c);
+            let bright = ((1000 - z) * 255 / 1000).clamp(30, 255) as u32;
+            let c = gfx::mix(0x05040F, near, bright);
+            let back = pz + (pz - z) * 2;
+            let (x0, y0) = (cx + x * focal / back.max(1), cy + y * focal / back.max(1));
+            // a DDA line: step along the longer axis
+            let (dx, dy) = (x1 - x0, y1 - y0);
+            let steps = dx.abs().max(dy.abs()).clamp(1, 64);
+            for i in 0..=steps {
+                let (lx, ly) = (x0 + dx * i / steps, y0 + dy * i / steps);
+                if lx >= 0 && lx < w && ly >= 0 && ly < h {
+                    // the streak fades towards its tail
+                    let f = gfx::mix(0x05040F, c, (i * 255 / steps) as u32);
+                    px[ly as usize * stride + lx as usize] = f;
+                    dirty.mark_px(lx, ly);
+                }
+            }
+            if z < 220 && x1 + 1 < w && y1 + 1 < h {
+                let i = y1 as usize * stride + x1 as usize;
+                px[i + 1] = c;
+                px[i + stride] = c;
+                px[i + stride + 1] = c;
+                dirty.mark_px(x1, y1);
+                dirty.mark_px(x1 + 1, y1 + 1);
             }
         }
     }
@@ -81,19 +102,20 @@ impl Pointer {
         let mut inp = Input { mouse: self.pos, inside: true, focused: true, ..Default::default() };
         inp.down = self.buttons & 1 != 0;
         if let Some((dx, dy, b)) = crate::mouse::take() {
-            let accel = |d: i32| d + d.signum() * (d * d / 24).min(d.abs() * 2);
-            self.pos = ((self.pos.0 + accel(dx)).clamp(0, w - 1), (self.pos.1 - accel(dy)).clamp(0, h - 1));
+            let (sx, sy) = crate::mouse::scale(dx, dy);
+            self.pos = ((self.pos.0 + sx).clamp(0, w - 1), (self.pos.1 - sy).clamp(0, h - 1));
             inp.mouse = self.pos;
             let prev = self.buttons;
+            let (pe, re) = crate::mouse::last_edges();
             self.buttons = b;
             inp.down = b & 1 != 0;
-            if b & 1 != 0 && prev & 1 == 0 {
+            if (b | pe) & 1 != 0 && prev & 1 == 0 {
                 inp.pressed = true;
                 let now = crate::time::uptime_ms();
                 inp.clicks = if now < self.last_click.0 + 420 { 2 } else { 1 };
                 self.last_click = (now, self.pos.0, self.pos.1);
             }
-            if b & 1 == 0 && prev & 1 != 0 {
+            if (prev & 1 != 0 || (b | pe) & 1 != 0 && prev & 1 == 0) && (b & 1 == 0 || re & 1 != 0) && !(b & 1 != 0 && prev & 1 == 0) {
                 inp.released = true;
             }
             if b & 2 != 0 && prev & 2 == 0 {
@@ -109,10 +131,88 @@ impl Pointer {
     }
 }
 
-fn present(buf: &[u32], w: i32, h: i32) {
+/// Which 64-pixel pieces of the screen changed: one bit per piece, one word per row.
+struct Dirty {
+    rows: Vec<u64>,
+    w: usize,
+    h: usize,
+}
+
+impl Dirty {
+    fn new(w: i32, h: i32, all: bool) -> Dirty {
+        let (w, h) = (w as usize, h as usize);
+        let mut d = Dirty { rows: alloc::vec![0; h], w, h };
+        if all {
+            d.mark_all();
+        }
+        d
+    }
+
+    fn clear(&mut self) {
+        self.rows.iter_mut().for_each(|r| *r = 0);
+    }
+
+    fn mark_all(&mut self) {
+        let chunks = (self.w + 63) / 64;
+        let all = if chunks >= 64 { u64::MAX } else { (1u64 << chunks) - 1 };
+        self.rows.iter_mut().for_each(|r| *r = all);
+    }
+
+    #[inline]
+    fn mark_px(&mut self, x: i32, y: i32) {
+        if x >= 0 && y >= 0 && (x as usize) < self.w && (y as usize) < self.h {
+            self.rows[y as usize] |= 1u64 << ((x as usize) >> 6);
+        }
+    }
+
+    fn mark_rect(&mut self, x: i32, y: i32, rw: i32, rh: i32) {
+        let (x0, x1) = (x.max(0) as usize, ((x + rw).max(0) as usize).min(self.w));
+        let (y0, y1) = (y.max(0) as usize, ((y + rh).max(0) as usize).min(self.h));
+        if x1 <= x0 || y1 <= y0 {
+            return;
+        }
+        let (c0, c1) = (x0 >> 6, (x1 - 1) >> 6);
+        let mut mask = 0u64;
+        for c in c0..=c1 {
+            mask |= 1u64 << c;
+        }
+        for y in y0..y1 {
+            self.rows[y] |= mask;
+        }
+    }
+}
+
+/// Puts the background back where the last frame drew something.
+fn restore(buf: &mut [u32], space: &[u32], prev: &Dirty) {
+    let w = prev.w;
+    for y in 0..prev.h {
+        let mut m = prev.rows[y];
+        while m != 0 {
+            let c = m.trailing_zeros() as usize;
+            m &= m - 1;
+            let (x0, x1) = (c * 64, (c * 64 + 64).min(w));
+            let o = y * w;
+            buf[o + x0..o + x1].copy_from_slice(&space[o + x0..o + x1]);
+        }
+    }
+}
+
+/// Shows the pieces that changed this frame or the last one (the old ones were restored).
+fn present(buf: &[u32], cur: &Dirty, prev: &Dirty) {
+    let w = cur.w;
     framebuffer::with_screen(|fb| {
-        fb.put32_rect(buf, 0, 0, w as usize, h as usize);
-        fb.flush();
+        for y in 0..cur.h {
+            let mut m = cur.rows[y] | prev.rows[y];
+            while m != 0 {
+                // a run of neighbouring pieces goes out in one piece
+                let c0 = m.trailing_zeros() as usize;
+                let run = (m >> c0).trailing_ones() as usize;
+                let run_mask: u64 = if run >= 64 { u64::MAX } else { ((1u64 << run) - 1) << c0 };
+                m &= !run_mask;
+                let (x0, x1) = (c0 * 64, ((c0 + run) * 64).min(w));
+                fb.present32(buf, x0, y, x1, y + 1);
+            }
+        }
     });
 }
 
@@ -160,7 +260,21 @@ const HELLOS: [&str; 8] = ["hello", "hola", "bonjour", "hallo", "ciao", "namaste
 /// Runs the setup. Returns when the user finishes it.
 pub fn run(w: i32, h: i32) {
     let mut buf = alloc::vec![0u32; (w * h) as usize];
-    let mut stars = Stars::new(420);
+    let mut space = alloc::vec![0u32; (w * h) as usize];
+    // pieces of the screen drawn on in the last frame / this frame (the first frame sends everything)
+    let mut prev_dirty = Dirty::new(w, h, true);
+    let mut cur_dirty = Dirty::new(w, h, false);
+    {
+        let mut cv = Canvas::new(&mut space, w as usize, h as usize);
+        for y in 0..h {
+            let c = gfx::mix(0x05040F, 0x1B1040, (y * 255 / h) as u32);
+            cv.hline(0, y, w, c, 255);
+        }
+        // the line Bit walks on is part of the background
+        cv.hline(0, h - 40, w, 0xFFFFFF, 30);
+    }
+    let mut stars = Stars::new(360);
+    let (mut frames, mut fps_at) = (0u32, crate::time::uptime_ms());
     let mut ptr = Pointer { pos: (w / 2, h / 2), buttons: 0, last_click: (0, 0, 0) };
     let mut st = UiState::default();
     let mut step = 0usize;
@@ -168,18 +282,21 @@ pub fn run(w: i32, h: i32) {
     // always start empty: an old saved name must not be typed into
     let mut name = String::new();
     let mut wall = 0usize;
+    let mut user = String::new();
+    let mut pass = String::new();
+    let mut last_step = 99usize;
     let mut speed: i32 = 6;
+    // the card (shadow, frosted fill, outline) over the background, drawn once and then just copied
+    let mut card_cache: Option<Vec<u32>> = None;
     buddy::set_context(buddy::Context::Onboarding);
     let started = crate::time::uptime_ms();
     loop {
         let now = crate::time::uptime_ms();
         let inp = ptr.poll(w, h);
+        // space: the gradient was painted once; copying it is just a memcpy
+        restore(&mut buf, &space, &prev_dirty);
+        cur_dirty.clear();
         let mut cv = Canvas::new(&mut buf, w as usize, h as usize);
-        // space: a deep gradient, then the stars
-        for y in 0..h {
-            let c = gfx::mix(0x05040F, 0x1B1040, (y * 255 / h) as u32);
-            cv.hline(0, y, w, c, 255);
-        }
         let target = match step {
             0 => 6,
             7 => 60,
@@ -187,7 +304,7 @@ pub fn run(w: i32, h: i32) {
         };
         speed += (target - speed).signum() * 1;
         stars.step(speed);
-        stars.draw(&mut cv, w, h, theme::accent());
+        stars.draw(&mut cv, &mut cur_dirty, w, h, theme::accent());
         let age = now.saturating_sub(step_at) as i32;
         let fade = ease_out((age * 1000 / 500).min(1000));
         let mut ui = Ui::new(cv, inp.clone(), &mut st);
@@ -205,23 +322,10 @@ pub fn run(w: i32, h: i32) {
                 let k = (age / per) as usize % HELLOS.len();
                 let t = age % per;
                 let a = if t < 400 { t * 255 / 400 } else if t > per - 400 { (per - t) * 255 / 400 } else { 255 };
-                let f = gfx::font(32, true);
                 let word = HELLOS[k];
-                // drawn large by repeating the 32px font at 3x through a small buffer
-                let tw = gfx::text_width(&f, word);
-                let (sw_, sh_) = ((tw + 4) as usize, 40usize);
-                let mut small = alloc::vec![0u32; sw_ * sh_];
-                {
-                    let mut sc = Canvas::new(&mut small, sw_, sh_);
-                    sc.text(2, 2, word, &f, 0xFFFFFF);
-                }
-                // the word as an alpha mask in white, scaled up smoothly
-                let mask: Vec<u32> = small.iter().map(|&p| ((p & 0xFF) << 24) | 0xFFFFFF).collect();
-                let scale = 3;
-                let (dw, dh) = (sw_ as i32 * scale, sh_ as i32 * scale);
                 let old = ui.cv.opacity;
                 ui.cv.opacity = a as u32;
-                ui.cv.blit_scaled(((w - dw) / 2, h / 2 - dh / 2 - 40, dw, dh), &mask, sw_, sh_, true, true);
+                ui.cv.text_big(w / 2, h / 2 - 140, word, 4, 0xFFFFFF);
                 ui.cv.opacity = old;
                 if age > 1200 {
                     let blink = ((now / 600) % 2 == 0) as u32 * 120 + 100;
@@ -238,10 +342,34 @@ pub fn run(w: i32, h: i32) {
                 let old = ui.cv.opacity;
                 ui.cv.opacity = (fade * 255 / 1000) as u32;
                 let y = cy + slide;
-                ui.cv.shadow(cx, y + 10, card_w, card_h, 22, 40, 160);
-                ui.cv.blur(cx, y, card_w, card_h, 10);
-                ui.cv.round_a(cx, y, card_w, card_h, 22, 0x1C1B2A, 200);
-                ui.cv.round_outline(cx, y, card_w, card_h, 22, 0xFFFFFF, 50);
+                let (rx, ry, rw, rh) = (cx - 70, cy - 50, card_w + 140, card_h + 190);
+                let cacheable = rx >= 0 && ry >= 0 && rx + rw <= w && ry + rh <= h;
+                if cacheable && (step > 1 || age >= 600) {
+                    if card_cache.is_none() {
+                        let mut c = alloc::vec![0u32; (rw * rh) as usize];
+                        for r in 0..rh {
+                            let src = ((ry + r) * w + rx) as usize;
+                            c[(r * rw) as usize..((r + 1) * rw) as usize].copy_from_slice(&space[src..src + rw as usize]);
+                        }
+                        {
+                            let mut cc = Canvas::new(&mut c, rw as usize, rh as usize);
+                            cc.shadow(70, 50 + 10, card_w, card_h, 22, 40, 160);
+                            cc.round_a(70, 50, card_w, card_h, 22, 0x1C1B2A, 228);
+                            cc.round_outline(70, 50, card_w, card_h, 22, 0xFFFFFF, 50);
+                        }
+                        card_cache = Some(c);
+                    }
+                    if let Some(c) = &card_cache {
+                        for r in 0..rh {
+                            let dst = ((ry + r) * w + rx) as usize;
+                            ui.cv.px[dst..dst + rw as usize].copy_from_slice(&c[(r * rw) as usize..((r + 1) * rw) as usize]);
+                        }
+                    }
+                } else {
+                    ui.cv.shadow(cx, y + 10, card_w, card_h, 22, 40, 160);
+                    ui.cv.round_a(cx, y, card_w, card_h, 22, 0x1C1B2A, 228);
+                    ui.cv.round_outline(cx, y, card_w, card_h, 22, 0xFFFFFF, 50);
+                }
                 let title_f = gfx::font(32, true);
                 let body_f = gfx::font(16, false);
                 // step dots
@@ -260,12 +388,33 @@ pub fn run(w: i32, h: i32) {
                         speech = "hi! i'm Bit. i'll come along while we set things up!";
                     }
                     2 => {
-                        ui.cv.text_center(w / 2, y + 40, "What's your name?", &title_f, 0xFFFFFF);
-                        ui.cv.text_center(w / 2, y + 86, "Bit would like to know what to call you.", &body_f, 0xD8D6E8);
-                        ui.st.focus = id("name");
-                        if ui.field(id("name"), (w / 2 - 160, y + 140, 320, 40), &mut name, "Your name") && !name.trim().is_empty() {
+                        ui.cv.text_center(w / 2, y + 34, "Create your account", &title_f, 0xFFFFFF);
+                        ui.cv.text_center(w / 2, y + 74, "Bit would like to know what to call you.", &body_f, 0xD8D6E8);
+                        let ids = [id("name"), id("user"), id("pass")];
+                        if last_step != 2 {
+                            ui.st.focus = ids[0];
+                        }
+                        if ui.key(Key::Char('\t')) {
+                            let at = ids.iter().position(|&i| i == ui.st.focus).unwrap_or(2);
+                            ui.st.focus = ids[(at + 1) % 3];
+                        }
+                        let fx = w / 2 - 160;
+                        // Enter moves to the next field; the focus changes only after all three were drawn,
+                        // so one Enter cannot run through every field
+                        let mut to = None;
+                        if ui.field(ids[0], (fx, y + 104, 320, 38), &mut name, "Your name") {
+                            to = Some(ids[1]);
+                        }
+                        if ui.field(ids[1], (fx, y + 154, 320, 38), &mut user, "Username (optional)") {
+                            to = Some(ids[2]);
+                        }
+                        if ui.field_ex(ids[2], (fx, y + 204, 320, 38), &mut pass, "Password (optional)", true) && !name.trim().is_empty() {
                             next = true;
                         }
+                        if let Some(f) = to {
+                            ui.st.focus = f;
+                        }
+                        ui.cv.text_center(w / 2, y + 254, "Leave the password empty for none. Change it later in Settings.", &gfx::font(13, false), 0x9A98B0);
                         speech = if name.trim().is_empty() { "type your name, then press enter." } else { "what a great name!" };
                     }
                     3 => {
@@ -360,6 +509,7 @@ pub fn run(w: i32, h: i32) {
                     6 => "Start Using zero",
                     _ => "Continue",
                 };
+                last_step = step;
                 let br = (w / 2 - 100, y + card_h - 76, 200, 40);
                 let enter = inp.keys.iter().any(|(k, _)| *k == Key::Char('\n')) && step != 2;
                 if ui.primary(br, label) || enter {
@@ -387,7 +537,6 @@ pub fn run(w: i32, h: i32) {
         let since = now.saturating_sub(started) as i32;
         let bx = 40 + ((since / 20) % (w - 200).max(1)).min(w - 200);
         let floor = h - 40;
-        ui.cv.hline(0, floor, w, 0xFFFFFF, 30);
         draw_bit(&mut ui.cv, bx, floor, 3);
         if step > 0 && step < 7 {
             bubble(&mut ui.cv, bx + 40, floor - 110, speech, (fade * 255 / 1000) as u32);
@@ -397,7 +546,22 @@ pub fn run(w: i32, h: i32) {
         let p = ui.inp.mouse;
         draw_pointer(&mut ui.cv, p);
         drop(ui);
-        present(&buf, w, h);
+        // where the UI drew this frame (generous: pieces that did not really change cost little)
+        match step {
+            0 => cur_dirty.mark_rect(w / 2 - 420, h / 2 - 180, 840, 280),
+            1..=6 => cur_dirty.mark_rect(cx - 70, cy - 50, card_w + 140, card_h + 190),
+            _ => cur_dirty.mark_all(),
+        }
+        cur_dirty.mark_rect(bx - 30, floor - 210, 470, 250);
+        cur_dirty.mark_rect(p.0 - 16, p.1 - 16, 48, 52);
+        present(&buf, &cur_dirty, &prev_dirty);
+        core::mem::swap(&mut prev_dirty, &mut cur_dirty);
+        frames += 1;
+        if now >= fps_at + 1000 {
+            crate::serial_println!("[setup] {} fps", frames);
+            frames = 0;
+            fps_at = now;
+        }
         if next {
             match step {
                 2 => {
@@ -405,6 +569,13 @@ pub fn run(w: i32, h: i32) {
                     if !n.is_empty() {
                         crate::settings::set("name", n);
                         buddy::set_name(n);
+                        let u: String = if user.trim().is_empty() {
+                            n.chars().filter(|c| c.is_alphanumeric()).collect::<String>().to_lowercase()
+                        } else {
+                            user.trim().into()
+                        };
+                        crate::settings::set("user", if u.is_empty() { "user" } else { &u });
+                        crate::settings::set_password(&pass);
                     }
                 }
                 4 => {
@@ -438,15 +609,10 @@ pub fn request_rerun() {
     crate::settings::set("desk_setup", "");
 }
 
-/// The lock screen: the time over the blurred desktop, until a click or a key.
+/// The lock screen: the time over a dark gradient. With no password a click or key opens it;
+/// otherwise the password has to be typed.
 pub fn lock_screen(w: i32, h: i32) {
     let mut back = alloc::vec![0u32; (w * h) as usize];
-    // take what is on screen as the background
-    let shot = framebuffer::with_screen(|fb| {
-        use crate::graphics::display::Display;
-        let _ = fb.width();
-    });
-    let _ = shot;
     {
         let mut cv = Canvas::new(&mut back, w as usize, h as usize);
         for y in 0..h {
@@ -455,46 +621,63 @@ pub fn lock_screen(w: i32, h: i32) {
     }
     let mut ptr = Pointer { pos: (w / 2, h / 2), buttons: 0, last_click: (0, 0, 0) };
     let name = crate::settings::get_or("name", "friend");
+    let need_pw = crate::settings::has_password();
     let mut st = UiState::default();
+    let mut typed = String::new();
+    let mut wrong_at: u64 = 0;
     let start = crate::time::uptime_ms();
+    let df = gfx::font(24, false);
+    let months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
     loop {
         let now = crate::time::uptime_ms();
         let inp = ptr.poll(w, h);
         let mut buf = back.clone();
+        let mut unlock = false;
         {
             let cv = Canvas::new(&mut buf, w as usize, h as usize);
             let mut ui = Ui::new(cv, inp.clone(), &mut st);
             let (hh, mm, _, d, mo, _) = super::desktop::read_rtc();
-            let months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
             let date = alloc::format!("{} {}", months.get((mo as usize).wrapping_sub(1)).copied().unwrap_or(""), d);
-            let f = gfx::font(24, false);
-            ui.cv.text_center(w / 2, 90, &date, &f, 0xFFFFFF);
-            // the time, large
+            ui.cv.text_center(w / 2, 80, &date, &df, 0xFFFFFF);
+            // the time, drawn with a real large font so it stays sharp
             let t = alloc::format!("{:02}:{:02}", hh, mm);
-            let tf = gfx::font(32, true);
-            let tw = gfx::text_width(&tf, &t);
-            let (sw_, sh_) = ((tw + 4) as usize, 40usize);
-            let mut small = alloc::vec![0u32; sw_ * sh_];
-            {
-                let mut sc = Canvas::new(&mut small, sw_, sh_);
-                sc.text(2, 2, &t, &tf, 0xFFFFFF);
-            }
-            let mask: Vec<u32> = small.iter().map(|&p| ((p & 0xFF) << 24) | 0xFFFFFF).collect();
-            ui.cv.blit_scaled(((w - sw_ as i32 * 3) / 2, 120, sw_ as i32 * 3, sh_ as i32 * 3), &mask, sw_, sh_, true, true);
+            ui.cv.text_big(w / 2, 100, &t, 4, 0xFFFFFF);
             let initial: String = name.chars().next().map(|c| c.to_ascii_uppercase()).into_iter().collect();
-            ui.cv.gradient(w / 2 - 36, h - 220, 72, 72, 36, 0x8E8EFF, 0x5E5CE6);
-            ui.cv.text_center(w / 2, h - 202, &initial, &gfx::font(32, true), 0xFFFFFF);
-            ui.cv.text_center(w / 2, h - 136, &name, &gfx::font(20, true), 0xFFFFFF);
-            let pulse = (now / 8 % 200) as i32;
-            let a = if pulse < 100 { pulse } else { 200 - pulse };
-            ui.cv.text_center(w / 2, h - 100, "Click or press any key to unlock", &gfx::font(16, false), gfx::mix(0x8080A0, 0xFFFFFF, (a * 2) as u32));
+            ui.cv.gradient(w / 2 - 36, h - 260, 72, 72, 36, 0x8E8EFF, 0x5E5CE6);
+            ui.cv.text_center(w / 2, h - 242, &initial, &gfx::font(32, true), 0xFFFFFF);
+            ui.cv.text_center(w / 2, h - 176, &name, &gfx::font(20, true), 0xFFFFFF);
+            if need_pw {
+                ui.st.focus = id("lockpw");
+                let shake = if now < wrong_at + 400 { ((now - wrong_at) as i32 / 40 % 2) * 12 - 6 } else { 0 };
+                if ui.field_ex(id("lockpw"), (w / 2 - 130 + shake, h - 140, 260, 38), &mut typed, "Password", true) {
+                    if crate::settings::check_password(&typed) {
+                        unlock = true;
+                    } else {
+                        typed.clear();
+                        wrong_at = now;
+                    }
+                }
+                let (msg, col) = if now < wrong_at + 2500 && wrong_at != 0 { ("Incorrect password", 0xFF6B6B) } else { ("Type your password and press enter", 0xA0A0C0) };
+                ui.cv.text_center(w / 2, h - 90, msg, &gfx::font(16, false), col);
+            } else {
+                let pulse = (now / 8 % 200) as i32;
+                let a = if pulse < 100 { pulse } else { 200 - pulse };
+                ui.cv.text_center(w / 2, h - 130, "Click or press any key to unlock", &gfx::font(16, false), gfx::mix(0x8080A0, 0xFFFFFF, (a * 2) as u32));
+                if (inp.pressed || !inp.keys.is_empty()) && now > start + 400 {
+                    unlock = true;
+                }
+            }
+            ui.finish();
             draw_pointer(&mut ui.cv, inp.mouse);
         }
-        present(&buf, w, h);
-        if (inp.pressed || !inp.keys.is_empty()) && now > start + 400 {
+        framebuffer::with_screen(|fb| fb.present32(&buf, 0, 0, w as usize, h as usize));
+        if unlock {
             break;
         }
         let _ = ui::inside;
-        crate::sched::yield_idle();
+        // the lock screen is nearly still: about 30 frames a second is plenty
+        while crate::time::uptime_ms() < now + 33 {
+            crate::sched::yield_idle();
+        }
     }
 }

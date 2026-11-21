@@ -362,6 +362,11 @@ impl<'a> Ui<'a> {
 
     /// A one-line text field. Returns true when Enter was pressed.
     pub fn field(&mut self, id: u64, r: Rect, text: &mut String, placeholder: &str) -> bool {
+        self.field_ex(id, r, text, placeholder, false)
+    }
+
+    /// A text field; `mask` shows stars instead of the text (passwords).
+    pub fn field_ex(&mut self, id: u64, r: Rect, text: &mut String, placeholder: &str, mask: bool) -> bool {
         let resp = self.interact(id, r);
         if resp.pressed {
             self.st.focus = id;
@@ -421,10 +426,11 @@ impl<'a> Ui<'a> {
         if text.is_empty() && !focused {
             self.cv.text(r.0 + 9, ty, placeholder, &f, th.text3);
         } else {
-            let before: String = text.chars().take(self.st.caret.min(text.chars().count())).collect();
+            let shown: String = if mask { text.chars().map(|_| '*').collect() } else { text.clone() };
+            let before: String = shown.chars().take(self.st.caret.min(shown.chars().count())).collect();
             let cw = gfx::text_width(&f, &before);
             let shift = (cw - (r.2 - 24)).max(0);
-            self.cv.text(r.0 + 9 - shift, ty, text, &f, th.text);
+            self.cv.text(r.0 + 9 - shift, ty, &shown, &f, th.text);
             if focused && (self.now / 530) % 2 == 0 {
                 self.cv.rect(r.0 + 9 - shift + cw, ty, 2, f.height() as i32, th.accent);
             }

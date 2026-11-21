@@ -748,12 +748,14 @@ impl Framebuffer {
             let s = &src[y * self.width + x0..y * self.width + x1];
             let d0 = y * self.pitch + x0 * bpp;
             let d = &mut self.back[d0..d0 + (x1 - x0) * bpp];
-            if bpp == 4 && !rgb {
+            if bpp == 4 && !rgb && d.as_ptr() as usize % 4 == 0 {
                 let dst = unsafe { core::slice::from_raw_parts_mut(d.as_mut_ptr() as *mut u32, x1 - x0) };
-                if d.as_ptr() as usize % 4 == 0 {
-                    dst.copy_from_slice(s);
-                    continue;
-                }
+                dst.copy_from_slice(s);
+                continue;
+            }
+            if bpp == 3 && !rgb {
+                convert_row_bgr24(s, d);
+                continue;
             }
             for (px, &c) in d.chunks_exact_mut(bpp).zip(s.iter()) {
                 let (r, g, b) = ((c >> 16) as u8, (c >> 8) as u8, c as u8);
@@ -955,4 +957,112 @@ fn corner_inset(r: usize, d: usize) -> usize {
         x -= 1;
     }
     (r - x) as usize
+}
+
+/// Packs 0x00RRGGBB pixels into 3-byte BGR pixels. Four pixels become three
+/// aligned 32 bit words (unaligned stores are very slow in an emulator).
+fn convert_row_bgr24(src: &[u32], dst: &mut [u8]) {
+    let n = src.len();
+    let mut i = 0;
+    let mut o = 0;
+    // a few single pixels until the destination is 4-byte aligned
+    while i < n && (dst.as_ptr() as usize + o) & 3 != 0 {
+        let c = src[i];
+        dst[o] = c as u8;
+        dst[o + 1] = (c >> 8) as u8;
+        dst[o + 2] = (c >> 16) as u8;
+        i += 1;
+        o += 3;
+    }
+    let words = unsafe { dst.as_mut_ptr().add(o) as *mut u32 };
+    let mut w = 0;
+    while i + 4 <= n {
+        let (a, b, c, d) = (src[i], src[i + 1], src[i + 2], src[i + 3]);
+        unsafe {
+            words.add(w).write((a & 0xFF_FFFF) | (b << 24));
+            words.add(w + 1).write(((b >> 8) & 0xFFFF) | (c << 16));
+            words.add(w + 2).write(((c >> 16) & 0xFF) | (d << 8));
+        }
+        w += 3;
+        i += 4;
+        o += 12;
+    }
+    while i < n {
+        let c = src[i];
+        dst[o] = c as u8;
+        dst[o + 1] = (c >> 8) as u8;
+        dst[o + 2] = (c >> 16) as u8;
+        i += 1;
+        o += 3;
+    }
+}
+
+impl Framebuffer {
+    /// Shows a rectangle of a screen-sized 0x00RRGGBB picture, converting straight
+    /// into video memory (no shadow buffer, so no second copy). Scaled modes go
+    /// through the shadow buffer as usual.
+    pub fn present32(&mut self, src: &[u32], x0: usize, y0: usize, x1: usize, y1: usize) {
+        // exactly twice the size on a 4 byte screen (the desktop on a big UEFI screen):
+        // double the pixels of just this piece straight into video memory
+        if self.scale == 2 << 16 && self.off_x == 0 && self.off_y == 0 && self.bpp == 4 && self.info.pixel_format != PixelFormat::Rgb && self.info.pixel_format != PixelFormat::U8 {
+            let (x1, y1) = (x1.min(self.width), y1.min(self.height));
+            if x1 <= x0 || y1 <= y0 {
+                return;
+            }
+            for y in y0..y1 {
+                let s = &src[y * self.width + x0..y * self.width + x1];
+                for k in 0..2 {
+                    let d0 = (2 * y + k) * self.front_pitch + 2 * x0 * 4;
+                    if d0 + s.len() * 8 > self.front.len() || d0 % 4 != 0 {
+                        break;
+                    }
+                    let d = unsafe { core::slice::from_raw_parts_mut(self.front.as_mut_ptr().add(d0) as *mut u32, s.len() * 2) };
+                    for (i, &c) in s.iter().enumerate() {
+                        d[2 * i] = c;
+                        d[2 * i + 1] = c;
+                    }
+                }
+            }
+            return;
+        }
+        if !self.x_map.is_empty() || self.info.pixel_format == PixelFormat::U8 {
+            self.put32_rect(src, x0, y0, x1, y1);
+            self.flush();
+            return;
+        }
+        let (x1, y1) = (x1.min(self.width), y1.min(self.height));
+        if x1 <= x0 || y1 <= y0 {
+            return;
+        }
+        let bpp = self.bpp;
+        let rgb = self.info.pixel_format == PixelFormat::Rgb;
+        for y in y0..y1 {
+            let s = &src[y * self.width + x0..y * self.width + x1];
+            let d0 = y * self.front_pitch + x0 * bpp;
+            if d0 + (x1 - x0) * bpp > self.front.len() {
+                break;
+            }
+            let d = &mut self.front[d0..d0 + (x1 - x0) * bpp];
+            if bpp == 3 && !rgb {
+                convert_row_bgr24(s, d);
+            } else if bpp == 4 && !rgb && d.as_ptr() as usize % 4 == 0 {
+                let dst = unsafe { core::slice::from_raw_parts_mut(d.as_mut_ptr() as *mut u32, x1 - x0) };
+                dst.copy_from_slice(s);
+            } else {
+                for (px, &c) in d.chunks_exact_mut(bpp).zip(s.iter()) {
+                    let (r, g, b) = ((c >> 16) as u8, (c >> 8) as u8, c as u8);
+                    if rgb {
+                        px[0] = r;
+                        px[1] = g;
+                        px[2] = b;
+                    } else {
+                        px[0] = b;
+                        px[1] = g;
+                        px[2] = r;
+                    }
+                }
+            }
+        }
+        // the shadow buffer no longer matches the screen: it is not used while the desktop runs
+    }
 }

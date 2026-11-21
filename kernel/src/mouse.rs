@@ -216,7 +216,12 @@ pub fn handle_byte(byte: u8) {
     }
     DX.fetch_add(dx, Ordering::Relaxed);
     DY.fetch_add(dy, Ordering::Relaxed);
-    BUTTONS.store(flags & 7, Ordering::Relaxed);
+    // remember every press and release, so a quick click is not lost when the screen is slow
+    let old = BUTTONS.load(Ordering::Relaxed);
+    let new = flags & 7;
+    PRESSES.fetch_or(new & !old, Ordering::Relaxed);
+    RELEASES.fetch_or(old & !new, Ordering::Relaxed);
+    BUTTONS.store(new, Ordering::Relaxed);
 }
 
 /// The movement since the last call and the buttons held (bit 0 left,
@@ -226,10 +231,41 @@ pub fn take() -> Option<(i32, i32, u8)> {
     let dx = DX.swap(0, Ordering::Relaxed);
     let dy = DY.swap(0, Ordering::Relaxed);
     let buttons = BUTTONS.load(Ordering::Relaxed);
-    if dx != 0 || dy != 0 || buttons != REPORTED.load(Ordering::Relaxed) {
+    let pe = PRESSES.swap(0, Ordering::Relaxed);
+    let re = RELEASES.swap(0, Ordering::Relaxed);
+    LAST_PRESSES.store(pe, Ordering::Relaxed);
+    LAST_RELEASES.store(re, Ordering::Relaxed);
+    if dx != 0 || dy != 0 || pe != 0 || re != 0 || buttons != REPORTED.load(Ordering::Relaxed) {
         REPORTED.store(buttons, Ordering::Relaxed);
         Some((dx, dy, buttons))
     } else {
         None
     }
+}
+
+static PRESSES: AtomicU8 = AtomicU8::new(0);
+static RELEASES: AtomicU8 = AtomicU8::new(0);
+static LAST_PRESSES: AtomicU8 = AtomicU8::new(0);
+static LAST_RELEASES: AtomicU8 = AtomicU8::new(0);
+
+/// Buttons pressed and released since the previous `take` (as of the last `take`), even when both
+/// happened between two calls.
+pub fn last_edges() -> (u8, u8) {
+    (LAST_PRESSES.load(Ordering::Relaxed), LAST_RELEASES.load(Ordering::Relaxed))
+}
+
+/// Pointer speed in percent (the desktop's pointer; games that capture the mouse get raw movement).
+pub static SPEED: AtomicI32 = AtomicI32::new(35);
+static REM_X: AtomicI32 = AtomicI32::new(0);
+static REM_Y: AtomicI32 = AtomicI32::new(0);
+
+/// Scales raw mouse movement by the pointer speed, keeping the fractions so slow
+/// movements are not lost.
+pub fn scale(dx: i32, dy: i32) -> (i32, i32) {
+    let speed = SPEED.load(Ordering::Relaxed).clamp(5, 300);
+    let fx = dx * speed + REM_X.load(Ordering::Relaxed);
+    let fy = dy * speed + REM_Y.load(Ordering::Relaxed);
+    REM_X.store(fx % 100, Ordering::Relaxed);
+    REM_Y.store(fy % 100, Ordering::Relaxed);
+    (fx / 100, fy / 100)
 }

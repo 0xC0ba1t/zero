@@ -64,3 +64,39 @@ pub fn clear() {
         partition::save_blob(lba, SECTORS, MAGIC, b"");
     }
 }
+
+/// Hashes a password for storage (salted with the user name, stretched). This keeps a password
+/// from sitting in the clear on disk; it is not meant to stand up to a determined attacker.
+pub fn hash_password(user: &str, password: &str) -> String {
+    let mut a: u64 = 0xcbf29ce484222325;
+    let mut b: u64 = 0x84222325cbf29ce4;
+    for round in 0..4000u32 {
+        for byte in user.bytes().chain(b":zero:".iter().copied()).chain(password.bytes()).chain(round.to_le_bytes()) {
+            a = (a ^ byte as u64).wrapping_mul(0x100000001b3);
+            b = (b.rotate_left(5) ^ byte as u64 ^ a).wrapping_mul(0x9E3779B97F4A7C15);
+        }
+    }
+    alloc::format!("{:016x}{:016x}", a, b)
+}
+
+/// Whether a password is set for the account.
+pub fn has_password() -> bool {
+    get("pass").map(|p| !p.is_empty()).unwrap_or(false)
+}
+
+/// Sets (or, when empty, removes) the account password.
+pub fn set_password(password: &str) {
+    if password.is_empty() {
+        set("pass", "");
+    } else {
+        set("pass", &hash_password("", password));
+    }
+}
+
+/// Checks a password against the saved one.
+pub fn check_password(password: &str) -> bool {
+    match get("pass") {
+        Some(saved) if !saved.is_empty() => saved == hash_password("", password),
+        _ => true,
+    }
+}

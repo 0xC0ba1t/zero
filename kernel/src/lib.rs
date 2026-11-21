@@ -37,6 +37,7 @@ pub mod sched;
 pub mod audio;
 pub mod codecs;
 pub mod zs;
+pub mod profile;
 pub mod pci;
 pub mod net;
 pub mod smp;
