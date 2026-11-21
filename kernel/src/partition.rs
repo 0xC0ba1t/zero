@@ -26,6 +26,33 @@ pub struct Partition {
 
 pub static PARTITION: Mutex<Option<Partition>> = Mutex::new(None);
 
+/// Set while the partition is being erased: nothing else may write to it any more.
+pub static RESETTING: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
+/// How many steps `wipe_step` needs.
+pub const WIPE_STEPS: u64 = 17;
+
+/// Erases the settings and the saved file system, a piece at a time (the read-only game data
+/// stays). Returns true after the last piece.
+pub fn wipe_step(i: u64) -> bool {
+    RESETTING.store(true, core::sync::atomic::Ordering::SeqCst);
+    let (start, settings_lba, tree_lba, tree_sectors) = match PARTITION.lock().as_ref() {
+        Some(p) => (p.start, p.settings_lba, p.tree_lba, p.tree_sectors),
+        None => return true,
+    };
+    let zeros = vec![0u8; 1024 * SECTOR];
+    if i == 0 {
+        let _ = disk::write(start + settings_lba, &zeros[..8 * SECTOR]);
+    } else {
+        let first = (i - 1) * 1024;
+        if first < tree_sectors {
+            let n = (tree_sectors - first).min(1024) as usize;
+            let _ = disk::write(start + tree_lba + first, &zeros[..n * SECTOR]);
+        }
+    }
+    i + 1 >= WIPE_STEPS
+}
+
 /// A file in the read-only asset area.
 #[derive(Clone, Copy)]
 pub struct Asset {
@@ -89,6 +116,9 @@ pub fn read(lba: u64, buf: &mut [u8]) -> bool {
 
 /// Writes sectors relative to the partition.
 pub fn write(lba: u64, buf: &[u8]) -> bool {
+    if RESETTING.load(core::sync::atomic::Ordering::SeqCst) {
+        return false;
+    }
     let start = match PARTITION.lock().as_ref() {
         Some(p) => p.start,
         None => return false,

@@ -12,12 +12,31 @@ use core::sync::atomic::{AtomicBool, AtomicI32, AtomicU8, Ordering};
 use x86_64::instructions::port::Port;
 
 static ENABLED: AtomicBool = AtomicBool::new(false);
+static KEEP: AtomicBool = AtomicBool::new(false);
+
+/// The desktop wants the mouse on for as long as it runs: programs that
+/// switch it off (Doom) leave it alone.
+pub fn keep_enabled(on: bool) {
+    KEEP.store(on, Ordering::SeqCst);
+}
 static DX: AtomicI32 = AtomicI32::new(0);
 static DY: AtomicI32 = AtomicI32::new(0);
 static BUTTONS: AtomicU8 = AtomicU8::new(0);
 static REPORTED: AtomicU8 = AtomicU8::new(0);
 
-static PACKET: [AtomicU8; 3] = [AtomicU8::new(0), AtomicU8::new(0), AtomicU8::new(0)];
+static PACKET: [AtomicU8; 4] = [AtomicU8::new(0), AtomicU8::new(0), AtomicU8::new(0), AtomicU8::new(0)];
+/// 3 for a plain mouse, 4 when the wheel is on.
+static PACKET_SIZE: AtomicU8 = AtomicU8::new(3);
+static WHEEL: AtomicI32 = AtomicI32::new(0);
+
+/// Wheel clicks since the last call (positive = towards the user = scroll down).
+pub fn take_wheel() -> i32 {
+    WHEEL.swap(0, Ordering::Relaxed)
+}
+
+fn set_rate(rate: u8) -> bool {
+    mouse_command(0xF3) && mouse_command(rate)
+}
 static FILLED: AtomicU8 = AtomicU8::new(0);
 
 fn status() -> u8 {
@@ -51,17 +70,55 @@ fn controller_data(data: u8) {
     unsafe { Port::<u8>::new(0x60).write(data) };
 }
 
+/// Waits for a byte from the mouse (bytes from the keyboard are skipped).
+fn read_aux() -> Option<u8> {
+    for _ in 0..400_000 {
+        let s = status();
+        if s & 1 != 0 {
+            let b = unsafe { Port::<u8>::new(0x60).read() };
+            if s & 0x20 != 0 {
+                return Some(b);
+            }
+        }
+    }
+    None
+}
+
 /// Sends a command to the mouse itself and waits for its acknowledge.
 fn mouse_command(command: u8) -> bool {
     controller_command(0xD4);
     controller_data(command);
-    read_data() == Some(0xFA)
+    // some mice resend a stale byte first: look at a few
+    for _ in 0..3 {
+        match read_aux() {
+            Some(0xFA) => return true,
+            Some(0xFE) => {
+                controller_command(0xD4);
+                controller_data(command);
+            }
+            Some(_) => {}
+            None => return false,
+        }
+    }
+    false
 }
 
 /// Starts reporting movement. Returns false if there is no mouse.
 pub fn enable() -> bool {
     // the controller's replies would otherwise be eaten by the keyboard interrupt handler
-    x86_64::instructions::interrupts::without_interrupts(enable_inner)
+    for _ in 0..3 {
+        if x86_64::instructions::interrupts::without_interrupts(enable_inner) {
+            return true;
+        }
+    }
+    // no mouse after all: switch its port off, or its bytes would block the keyboard
+    x86_64::instructions::interrupts::without_interrupts(|| {
+        controller_command(0xA7);
+        while status() & 1 != 0 {
+            unsafe { Port::<u8>::new(0x60).read() };
+        }
+    });
+    false
 }
 
 fn enable_inner() -> bool {
@@ -80,7 +137,17 @@ fn enable_inner() -> bool {
     controller_command(0x60);
     controller_data(config);
 
-    if !mouse_command(0xF6) || !mouse_command(0xF4) {
+    if !mouse_command(0xF6) {
+        return false;
+    }
+    // the "IntelliMouse" knock: these three sample rates turn the wheel on
+    PACKET_SIZE.store(3, Ordering::SeqCst);
+    if set_rate(200) && set_rate(100) && set_rate(80) && mouse_command(0xF2) {
+        if read_aux() == Some(3) {
+            PACKET_SIZE.store(4, Ordering::SeqCst);
+        }
+    }
+    if !mouse_command(0xF4) {
         return false;
     }
     DX.store(0, Ordering::SeqCst);
@@ -101,6 +168,9 @@ pub fn disable() {
 }
 
 fn disable_inner() {
+    if KEEP.load(Ordering::SeqCst) {
+        return;
+    }
     if !ENABLED.swap(false, Ordering::SeqCst) {
         return;
     }
@@ -120,7 +190,8 @@ pub fn handle_byte(byte: u8) {
         return;
     }
     PACKET[have].store(byte, Ordering::Relaxed);
-    if have + 1 < 3 {
+    let size = PACKET_SIZE.load(Ordering::Relaxed) as usize;
+    if have + 1 < size {
         FILLED.store(have as u8 + 1, Ordering::Relaxed);
         return;
     }
@@ -138,9 +209,19 @@ pub fn handle_byte(byte: u8) {
     if flags & 0x20 != 0 {
         dy -= 256;
     }
+    if size == 4 {
+        let z = (PACKET[3].load(Ordering::Relaxed) & 0x0F) as i32;
+        let z = if z >= 8 { z - 16 } else { z };
+        WHEEL.fetch_add(z, Ordering::Relaxed);
+    }
     DX.fetch_add(dx, Ordering::Relaxed);
     DY.fetch_add(dy, Ordering::Relaxed);
-    BUTTONS.store(flags & 7, Ordering::Relaxed);
+    // remember every press and release, so a quick click is not lost when the screen is slow
+    let old = BUTTONS.load(Ordering::Relaxed);
+    let new = flags & 7;
+    PRESSES.fetch_or(new & !old, Ordering::Relaxed);
+    RELEASES.fetch_or(old & !new, Ordering::Relaxed);
+    BUTTONS.store(new, Ordering::Relaxed);
 }
 
 /// The movement since the last call and the buttons held (bit 0 left,
@@ -150,10 +231,41 @@ pub fn take() -> Option<(i32, i32, u8)> {
     let dx = DX.swap(0, Ordering::Relaxed);
     let dy = DY.swap(0, Ordering::Relaxed);
     let buttons = BUTTONS.load(Ordering::Relaxed);
-    if dx != 0 || dy != 0 || buttons != REPORTED.load(Ordering::Relaxed) {
+    let pe = PRESSES.swap(0, Ordering::Relaxed);
+    let re = RELEASES.swap(0, Ordering::Relaxed);
+    LAST_PRESSES.store(pe, Ordering::Relaxed);
+    LAST_RELEASES.store(re, Ordering::Relaxed);
+    if dx != 0 || dy != 0 || pe != 0 || re != 0 || buttons != REPORTED.load(Ordering::Relaxed) {
         REPORTED.store(buttons, Ordering::Relaxed);
         Some((dx, dy, buttons))
     } else {
         None
     }
+}
+
+static PRESSES: AtomicU8 = AtomicU8::new(0);
+static RELEASES: AtomicU8 = AtomicU8::new(0);
+static LAST_PRESSES: AtomicU8 = AtomicU8::new(0);
+static LAST_RELEASES: AtomicU8 = AtomicU8::new(0);
+
+/// Buttons pressed and released since the previous `take` (as of the last `take`), even when both
+/// happened between two calls.
+pub fn last_edges() -> (u8, u8) {
+    (LAST_PRESSES.load(Ordering::Relaxed), LAST_RELEASES.load(Ordering::Relaxed))
+}
+
+/// Pointer speed in percent (the desktop's pointer; games that capture the mouse get raw movement).
+pub static SPEED: AtomicI32 = AtomicI32::new(35);
+static REM_X: AtomicI32 = AtomicI32::new(0);
+static REM_Y: AtomicI32 = AtomicI32::new(0);
+
+/// Scales raw mouse movement by the pointer speed, keeping the fractions so slow
+/// movements are not lost.
+pub fn scale(dx: i32, dy: i32) -> (i32, i32) {
+    let speed = SPEED.load(Ordering::Relaxed).clamp(5, 300);
+    let fx = dx * speed + REM_X.load(Ordering::Relaxed);
+    let fy = dy * speed + REM_Y.load(Ordering::Relaxed);
+    REM_X.store(fx % 100, Ordering::Relaxed);
+    REM_Y.store(fy % 100, Ordering::Relaxed);
+    (fx / 100, fy / 100)
 }

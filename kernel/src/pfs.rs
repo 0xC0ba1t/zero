@@ -12,8 +12,9 @@ fn area() -> Option<(u64, u64)> {
 /// Loads the saved file system, if there is one.
 pub fn load() -> Option<Filesystem> {
     let (lba, sectors) = area()?;
-    let bytes = partition::load_blob(lba, sectors, MAGIC)?;
-    Filesystem::from_bytes(&bytes)
+    let bytes = partition::load_blob(lba, sectors, MAGIC);
+    let fs = Filesystem::from_bytes(&bytes?);
+    fs
 }
 
 /// Writes the file system to the partition if it changed since the last save.
@@ -35,5 +36,15 @@ pub fn sync_if_dirty() -> bool {
             None => return false,
         }
     };
-    partition::save_blob(lba, sectors, MAGIC, &bytes)
+    let ok = partition::save_blob(lba, sectors, MAGIC, &bytes);
+    if !ok {
+        crate::serial_println!("[pfs] saving {} bytes failed", bytes.len());
+    }
+    if !ok {
+        // try again next time
+        if let Some(fs) = FILESYSTEM.lock().as_mut() {
+            fs.mark_dirty();
+        }
+    }
+    ok
 }

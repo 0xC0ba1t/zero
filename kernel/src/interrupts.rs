@@ -26,6 +26,19 @@ extern "x86-interrupt" fn spurious_handler(_stack_frame: InterruptStackFrame) {
     crate::hlt_loop_noirq();
 }
 
+/// Wakes a processor that is waiting for work (see `smp`).
+extern "x86-interrupt" fn wake_handler(_stack_frame: InterruptStackFrame) {
+    crate::smp::lapic_eoi();
+}
+
+/// The local APIC's spurious interrupt: nothing to do, and no end-of-interrupt.
+extern "x86-interrupt" fn lapic_spurious_handler(_stack_frame: InterruptStackFrame) {}
+
+/// Loads the interrupt table on another processor.
+pub fn load_idt_secondary() {
+    IDT.load();
+}
+
 lazy_static! {
     /// The IDT lives in static memory so its address remains valid after
     /// `init_idt` returns and the CPU's IDTR keeps pointing at it.
@@ -46,6 +59,9 @@ lazy_static! {
         for vector in 32..=255u8 {
             idt[vector].set_handler_fn(spurious_handler);
         }
+
+        idt[crate::smp::WAKE].set_handler_fn(wake_handler);
+        idt[0xFF].set_handler_fn(lapic_spurious_handler);
 
         // Override with specific handlers
         idt.breakpoint.set_handler_fn(breakpoint_handler);
@@ -102,9 +118,10 @@ extern "x86-interrupt" fn page_fault_handler(
 }
 
 extern "x86-interrupt" fn timer_interrupt_handler(
-    _stack_frame: InterruptStackFrame)
+    stack_frame: InterruptStackFrame)
 {
     time::tick();
+    crate::profile::sample(stack_frame.instruction_pointer.as_u64());
 
     unsafe {
         PICS.lock()
@@ -117,6 +134,8 @@ extern "x86-interrupt" fn timer_interrupt_handler(
     if TICKS.fetch_add(1, core::sync::atomic::Ordering::Relaxed) % 4 == 0 {
         crate::doom::audio_tick();
     }
+    // time slices for the threads (may switch to another thread)
+    crate::sched::timer_tick();
 }
 
 extern "x86-interrupt" fn keyboard_interrupt_handler(
@@ -159,6 +178,17 @@ extern "x86-interrupt" fn keyboard_interrupt_handler(
                 DecodedKey::RawKey(KeyCode::Home) => input::push_key(Key::Home),
                 DecodedKey::RawKey(KeyCode::End) => input::push_key(Key::End),
                 DecodedKey::RawKey(KeyCode::Delete) => input::push_key(Key::Delete),
+                DecodedKey::RawKey(code) => {
+                    use KeyCode as K;
+                    let f = match code {
+                        K::F1 => 1, K::F2 => 2, K::F3 => 3, K::F4 => 4, K::F5 => 5, K::F6 => 6,
+                        K::F7 => 7, K::F8 => 8, K::F9 => 9, K::F10 => 10, K::F11 => 11, K::F12 => 12,
+                        _ => 0,
+                    };
+                    if f > 0 {
+                        input::push_key(Key::F(f));
+                    }
+                }
                 DecodedKey::RawKey(_) => {}
             }
         }

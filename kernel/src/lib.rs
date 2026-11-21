@@ -33,6 +33,15 @@ pub mod pfs;
 pub mod settings;
 pub mod graphics;
 pub mod onboard;
+pub mod sched;
+pub mod audio;
+pub mod codecs;
+pub mod zs;
+pub mod profile;
+pub mod pci;
+pub mod net;
+pub mod smp;
+pub mod gui;
 
 pub trait Testable {
     fn run(&self) -> ();

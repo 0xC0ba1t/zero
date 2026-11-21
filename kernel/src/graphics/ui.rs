@@ -30,6 +30,18 @@ pub const PURPLE: u32 = 0xB477CF;
 pub const CYAN: u32 = 0x6EB4BF;
 pub const ORANGE: u32 = 0xBF956A;
 
+/// True while the desktop is running: windows have no title and status bars of
+/// their own (the desktop draws the window frame).
+pub static GUI: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
+pub fn is_gui() -> bool {
+    gui()
+}
+
+fn gui() -> bool {
+    GUI.load(Ordering::Relaxed)
+}
+
 /// Where things go on a screen of a given size.
 #[derive(Clone, Copy)]
 pub struct Layout {
@@ -44,11 +56,14 @@ pub struct Layout {
 impl Layout {
     /// Top of the area between the bars.
     pub fn body_y(&self) -> usize {
-        self.title_h + 1
+        if self.title_h == 0 { 0 } else { self.title_h + 1 }
     }
 
     /// Height of the area between the bars.
     pub fn body_h(&self) -> usize {
+        if self.title_h == 0 && self.status_h == 0 {
+            return self.height;
+        }
         self.height.saturating_sub(self.title_h + self.status_h + 2)
     }
 }
@@ -66,9 +81,9 @@ pub fn layout(width: usize, height: usize) -> Layout {
         width,
         height,
         font,
-        title_h: font.height() + 18,
+        title_h: if gui() { 0 } else { font.height() + 18 },
         // tall enough for the buddy to stand in
-        status_h: (font.height() + 10).max(46).max(height / 18),
+        status_h: if gui() { 0 } else { (font.height() + 10).max(46).max(height / 18) },
     }
 }
 
@@ -163,6 +178,9 @@ fn shell_status(width: usize, height: usize) -> (String, String) {
 
 /// Draws the shell's title bar and status bar.
 pub fn draw_shell_chrome(fb: &mut Framebuffer) {
+    if gui() {
+        return;
+    }
     let lay = layout(fb.width(), fb.height());
     let (left, right) = shell_status(fb.width(), fb.height());
     draw_title(fb, &lay, "terminal", concat!("zero ", env!("CARGO_PKG_VERSION")));
@@ -174,6 +192,9 @@ static LAST_BUDDY_FRAME: AtomicU64 = AtomicU64::new(0);
 
 /// Redraws just the status bar (after a command, or when the clock moves).
 pub fn refresh_status() {
+    if gui() {
+        return;
+    }
     let (w, h) = match framebuffer::with(|fb| (fb.width(), fb.height())) {
         Some(size) => size,
         None => return,
@@ -191,6 +212,9 @@ pub fn refresh_status() {
 /// Called while the shell waits for a key: keeps the clock in the status bar
 /// current and the buddy moving (about ten frames a second).
 pub fn tick_status() {
+    if gui() {
+        return;
+    }
     let now = crate::time::uptime_ms();
     if LAST_STATUS_SECOND.load(Ordering::Relaxed) != crate::time::uptime_secs()
         || now.saturating_sub(LAST_BUDDY_FRAME.load(Ordering::Relaxed)) >= 100
@@ -202,6 +226,9 @@ pub fn tick_status() {
 /// Keeps the buddy moving in a status bar that something else owns (a script
 /// screen, a 3D demo): redraws just that bar when a frame is due.
 pub fn tick_buddy(left: &str, right: &str) {
+    if gui() {
+        return;
+    }
     let now = crate::time::uptime_ms();
     if now.saturating_sub(LAST_BUDDY_FRAME.load(Ordering::Relaxed)) < 100 {
         return;

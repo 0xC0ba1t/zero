@@ -1,0 +1,12 @@
+Welcome to zero!
+
+This is Notes, a little text editor.
+Files you save land in Documents.
+
+Tips:
+  Super+Space   search anything
+  F3            Mission Control
+  F4            Launchpad
+  Right-click   menus everywhere
+
+Write a ZeroScript program, save it as something.zs and open it to run it.

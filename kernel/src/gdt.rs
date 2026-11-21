@@ -54,3 +54,16 @@ pub fn init() {
         load_tss(GDT.1.tss_selector);
     }
 }
+
+/// For a second processor: the same descriptor tables, but no task register
+/// (the task state segment can only be in use on one processor).
+pub fn init_secondary() {
+    use x86_64::instructions::segmentation::{CS, DS, ES, SS, Segment};
+    GDT.0.load();
+    unsafe {
+        CS::set_reg(GDT.1.code_selector);
+        SS::set_reg(GDT.1.data_selector);
+        DS::set_reg(GDT.1.data_selector);
+        ES::set_reg(GDT.1.data_selector);
+    }
+}

@@ -48,6 +48,9 @@ fn show_prompt(editor: &mut LineEditor) -> Prompt {
 
 /// Redraws the input line and puts the cursor where the editor has it.
 fn redraw(editor: &LineEditor, prompt: &mut Prompt) {
+    // a resized window may have moved the prompt up or down
+    let shift = CONSOLE.lock().take_row_shift();
+    prompt.row = (prompt.row as isize + shift).max(0) as usize;
     let text = editor.as_str();
     let wipe = prompt.drawn.saturating_sub(text.len());
     CONSOLE
@@ -63,7 +66,7 @@ fn next_key() -> input::Key {
             return key;
         }
         ui::tick_status();
-        x86_64::instructions::hlt();
+        crate::sched::yield_idle();
     }
 }
 

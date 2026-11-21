@@ -656,7 +656,7 @@ fn run_one(index: usize) -> Exit {
 
         // at most one frame per timer tick (100 Hz); don't spin
         while crate::time::ticks() == last_tick {
-            x86_64::instructions::hlt();
+            crate::sched::yield_idle();
         }
         last_tick = crate::time::ticks();
     }

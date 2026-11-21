@@ -63,6 +63,10 @@ impl Font {
         Font { size: self.size, weight: FontWeight::Bold }
     }
 
+    pub fn is_bold(&self) -> bool {
+        matches!(self.weight, FontWeight::Bold)
+    }
+
     pub fn width(&self) -> usize {
         get_raster_width(self.weight, self.size)
     }
